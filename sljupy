@@ -1,0 +1,21 @@
+#!/bin/bash -l 
+#SBATCH --job-name="$1"
+#SBATCH --ntasks=1 
+#SBATCH --cpus-per-task=1 
+#SBATCH --partition=htc  
+#SBATCH --mem=1000 
+#SBATCH --time=00:30:00 
+#SBATCH --output=pythjob-%j.out 
+#SBATCH --mail-type=NONE 
+#SBATCH --comment "Python commands to run wherever"
+
+
+echo "starting..." 
+source activate lnstr
+echo "env set up..." 
+
+export OMP_NUM_THREADS=1
+echo "running: ipython"
+ipython 
+
+echo "Done!"

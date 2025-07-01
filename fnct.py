@@ -1,0 +1,487 @@
+import glob
+import h5py
+import pickle
+import numpy as np
+from decimal import Decimal
+
+import astropy.units as u
+from astropy.constants import G
+import matplotlib.pyplot as plt  
+from concurrent.futures import ThreadPoolExecutor
+
+from get_res import load_whatever
+from tools import mkdir
+####
+
+# data dir structure: data_path 
+#                        |_ Sim
+#                            |_snapshots_of_particles
+#                            |_Gals
+#                                |_snaphots_of_gals (obtained from particles)
+# data path
+part_data_path = "/pbs/home/g/gqueirolo/EAGLE/data/"
+# "Standard" simulation
+# use the following only as test case
+#std_sim  = "RefL0012N0188"
+std_sim ="RefL0025N0752"
+sim_path = part_data_path+std_sim+"/"
+# Where to store the galaxies
+gal_dir = sim_path+"/Gals"
+mkdir(gal_dir)
+# from https://dataweb.cosma.dur.ac.uk:8443/eagle-snapshots/
+# valid fo all sims apart the variable IMF runs
+kw_snap_z = {"28":0, "27":0.1, "26":0.18, "25":0.27, "24":0.37, "23":0.5, "22":0.62, "21":0.74, "20":0.87, "19":1, "18":1.26, "17":1.49, "16":1.74, "15":2.01, "14":2.24, "13":2.48, "12":3.02, "11":3.53, "10":3.98, "9":4.49, "8":5.04, "7":5.49, "6":5.97, "5":7.05, "4":8.07, "3":8.99, "2":9.99, "1":15.13, "0":20}
+#inverted kw
+kw_z_snap = {}
+for k in kw_snap_z:
+    kw_z_snap[kw_snap_z[k]] = k
+# z indexes
+z_index = np.array([float(f) for f in list(kw_z_snap.keys())])
+
+def get_z(snap):
+    snap = str(snap)
+    while snap[0]=="0" and snap!="0":
+        snap = snap[1:]
+    return kw_snap_z[snap]
+
+def get_snap(z,_ln_snap=None):
+    # consider a continous z instead of the discreet version
+    # works for discreet z as well
+    key_z = min(kw_z_snap.keys(),key=lambda k:np.abs(k-float(z)))
+    snap  = str(kw_z_snap[key_z])
+    snap  = prepend_str(snap,ln_str=_ln_snap,fill=0)
+    return snap
+
+def get_z_snap(z=None,snap=None):
+    if z is None and snap is None:
+        raise UserWarning("Give either z or snap")
+    if z is None:
+        z = get_z(snap)
+    else:
+        snap = get_snap(z)
+    return z,snap
+    
+def prepend_str(str_i,ln_str,fill="0"):
+    if ln_str is None:
+        return str_i
+    str_i = str(str_i)
+    fill  = str(fill) 
+    while len(str_i)<ln_str:
+        str_i=fill+str_i
+    return str_i
+
+def get_files(sim,z=None,snap=None,_i_="*"):
+    """
+    Find the files 
+    If _i_ is specified, only that specific subsection of the snapshot (useful for DM)
+    If no redshift/snapshots are define, take all of them
+    """
+    
+    sim_path = part_data_path+"/"+sim
+    # find the files
+    _i_ = str(_i_)
+    pstring = "???"
+    suffix = "p"+pstring+"."+_i_+".hdf5"
+    prefix = sim_path+"/snapshot_"
+    if z is None and snap is None:
+        # take all snapshots/all redshifts
+        snap ="0??"
+        zstr = "???"
+    else:
+        if z is not None and snap is not None:
+            # verify that they are compatible:
+            assert int(get_snap(z))==int(snap)
+        if z is not None:
+            zstr = str(int(z))
+            snap = get_snap(z)
+        elif snap is not None:
+            zstr = str(get_z(snap))
+        snap = prepend_str(snap,ln_str=3,fill="0")
+        zstr = prepend_str(zstr,ln_str=3,fill="0")
+    
+    fix  = f"{snap}_z{zstr}p{pstring}/snap_{snap}_z{zstr}"
+    file_string = prefix+fix+suffix
+    #print("#DEBUG")
+    #print(file_string)
+    files = glob.glob(file_string)
+    return files
+
+# ugly fnct but should be correct:
+def get_simsize(sim_name):
+    return int(sim_name.split("L")[1].split("N")[0])
+
+def stnd_read_dataset(itype, att,
+                 z=None,snap=None,
+                 sim=std_sim):
+    """ Read a selected dataset:
+        - itype is the PartType (stars,gas etc) 
+        - att is the attribute name (Group, Subgroup etc). 
+        If no redshift/snapshots are define, take all of them
+    """
+    # Output array.
+    data  = []
+    files = get_files(sim=sim,z=z,snap=snap)
+    # Loop over each file and extract the data.
+    for i,file in enumerate(files):
+        with h5py.File(file, 'r') as f:
+            tmp = f['PartType%i/%s'%(itype, att)][...]
+            data.append(tmp)
+            if i==0:
+                # Get conversion factors.
+                cgs     = f['PartType%i/%s'%(itype, att)].attrs.get('CGSConversionFactor')
+                aexp    = f['PartType%i/%s'%(itype, att)].attrs.get('aexp-scale-exponent')
+                hexp    = f['PartType%i/%s'%(itype, att)].attrs.get('h-scale-exponent')
+        
+                # Get expansion factor and Hubble parameter from the header.
+                a       = f['Header'].attrs.get('Time')
+                h       = f['Header'].attrs.get('HubbleParam')
+
+    # Combine to a single array.
+    if len(tmp.shape) > 1:
+        data = np.vstack(data)
+    else:
+        data = np.concatenate(data)
+
+    # Convert to physical.
+    if data.dtype != np.int32 and data.dtype != np.int64:
+        data = np.multiply(data, cgs * a**aexp * h**hexp, dtype='f8')
+
+    return data
+
+def read_dataset(itype, att, z=None, snap=None, sim=std_sim):
+    files = get_files(sim=sim, z=z, snap=snap)
+    data_chunks = []
+    meta = {}
+
+    def read_file(i_file_tuple):
+        i, file = i_file_tuple
+        with h5py.File(file, 'r') as f:
+            dataset = f[f'PartType{itype}/{att}'][...]
+            if i == 0:
+                meta['cgs'] = f[f'PartType{itype}/{att}'].attrs.get('CGSConversionFactor')
+                meta['aexp'] = f[f'PartType{itype}/{att}'].attrs.get('aexp-scale-exponent')
+                meta['hexp'] = f[f'PartType{itype}/{att}'].attrs.get('h-scale-exponent')
+                meta['a'] = f['Header'].attrs.get('Time')
+                meta['h'] = f['Header'].attrs.get('HubbleParam')
+        return dataset
+
+    with ThreadPoolExecutor() as executor:
+        data_chunks = list(executor.map(read_file, enumerate(files)))
+
+    # Combine arrays
+    if data_chunks[0].ndim > 1:
+        data = np.vstack(data_chunks)
+    else:
+        data = np.concatenate(data_chunks)
+
+    # Apply conversion if not integer
+    if data.dtype not in (np.int32, np.int64):
+        data = np.multiply(data, meta['cgs'] * meta['a']**meta['aexp'] * meta['h']**meta['hexp'], dtype='f8')
+
+    return data
+
+
+def read_snap_header(z=None,snap=None,sim=std_sim):
+    """ Read various attributes from the header group. """
+    file    = get_files(sim,z,snap,_i_=0)
+    #print("#DEBUG")
+    #print(sim,z,snap)
+    if len(file)!=1:
+        raise RuntimeError("Warning: define only one snapshot")
+        print("file=",file)
+    file = file[0]
+    with h5py.File(file, 'r') as f:
+        a       = f['Header'].attrs.get('Time')         # Scale factor.
+        h       = f['Header'].attrs.get('HubbleParam')  # h.
+        boxsize = f['Header'].attrs.get('BoxSize')      # L [Mph/h].
+    return a, h, boxsize
+
+def read_dataset_dm_mass(z,snap,sim=std_sim):
+    """Special case for the mass of dark matter particles."""
+    # Output array.
+    files =get_files(sim=sim,z=z,snap=snap,_i_="0")
+    if len(files)!=1:
+        raise RuntimeError("Define the z and/or snap")
+    with h5py.File(files[0], 'r') as f:
+        h = f['Header'].attrs.get('HubbleParam')
+        a = f['Header'].attrs.get('Time')
+        dm_mass = f['Header'].attrs.get('MassTable')[1]
+        n_particles = f['Header'].attrs.get('NumPart_Total')[1]
+        # Create an array of lenght n_particles each set to dm_mass
+        m = np.ones(n_particles, dtype='f8') *dm_mass
+        # Use the conversion factors from the mass entry in the gas particles.
+        cgs = f['PartType0/Mass'].attrs.get('CGSConversionFactor')
+        aexp = f['PartType0/Mass'].attrs.get('aexp-scale-exponent')
+        hexp = f['PartType0/Mass'].attrs.get('h-scale-exponent')
+    # Convert to phyiscal
+    m = np.multiply(m, cgs*a**aexp*h**hexp, dtype='f8')
+    return m
+
+def get_gal_path(Gal,ret_snap_dir=False):
+    try:
+        gal_path,gal_snap_dir =  Gal.gal_path,Gal.gal_snap_dir
+    except:
+        gal_snap_dir = f"{gal_dir}/snap_{Gal.snap}/"
+        gal_path = f"{gal_snap_dir}/G{Gal.Gn}SGn{Gal.SGn}.pkl"
+    if ret_snap_dir:
+        return gal_path,gal_snap_dir
+    return gal_path
+        
+class Galaxy:
+    def __init__(self, Gn, SGn, CMx,CMy,CMz,M=None,
+                 sim=std_sim,z=None,snap=None,query=""):
+        self.sim    = sim
+        z,snap      = self.get_z_snap(z,snap)
+        self.z      = z
+        self.snap   = snap
+        self.centre = np.array([CMx,CMy,CMz])
+        self.Gn     = Gn
+        self.SGn    = SGn
+        self.M      = M # not really useful
+        self.query  = query # query from which this gal is selected (important later for sel. bias)
+
+        # Define/Create Gal path
+        self.set_gal_path()
+         
+        # centre only needed here to correct the coordinates
+        # it could in theory get recovered from the particles themselves
+        # as it follows X = Sum miXi / Sum mi
+
+        # Load data.
+        self.a, self.h, self.boxsize = self.read_snap_header()
+        # check if gal exists and if it's the same, if so load that instead
+        try:
+            GL = load_whatever(self.gal_path)
+            if self.__eq__(GL):
+                # this is what takes the longest
+                self.gas   = GL.gas
+                self.dm    = GL.dm
+                self.bh    = GL.bh
+                self.stars = GL.stars
+                to_store = False
+            else:
+                raise RuntimeError("Galaxy file exists but is not the same")
+        except:
+            self.gas    = self.read_galaxy(0)
+            self.dm     = self.read_galaxy(1)
+            self.stars  = self.read_galaxy(4)
+            self.bh     = self.read_galaxy(5)
+            to_store    = True
+        self._count_tot_part()
+        self._mass_tot_part()
+        self._verify_cnt()
+        if to_store:
+            self.store_gal()
+
+
+        
+    def read_galaxy(self,itype):
+        kw_gal = self._get_kw_gal()
+        return read_galaxy(itype=itype,**kw_gal)
+        
+    def read_snap_header(self):
+        return read_snap_header(z=self.z,snap=self.snap,sim=self.sim)
+        
+    def _get_kw_gal(self):
+        kw_gal = {"gn":self.Gn,"sgn":self.SGn,
+                 "snap":self.snap,"z":self.z,
+                 "boxsize":self.boxsize,"h":self.h,"centre":self.centre}
+        return kw_gal 
+        
+    def get_z_snap(self,z,snap):
+        return get_z_snap(z,snap)
+        
+    def _count_tot_part(self):
+        self.N_gas = _count_part(self.gas)
+        self.N_dm = _count_part(self.dm)
+        self.N_stars = _count_part(self.stars)
+        self.N_bh = _count_part(self.bh)
+        self.N_tot_part =  self.N_gas+self.N_dm+self.N_stars +self.N_bh
+        return self.N_tot_part
+
+    def _mass_tot_part(self):
+        self.M_gas = _mass_part(self.gas)
+        self.M_dm = _mass_part(self.dm)
+        self.M_stars = _mass_part(self.stars)
+        self.M_bh = _mass_part(self.bh)
+        self.M_tot =  self.M_gas+self.M_dm+self.M_stars +self.M_bh
+        np.testing.assert_almost_equal(float(self.M_tot)/float(self.M),1,decimal=3)
+        return self.M_tot
+
+    def _verify_cnt(self):
+        # verify that the center of mass is indeed correct
+        if not hasattr(self,"M_tot"):
+            self._mass_tot_part()
+        
+        for i,cnt_m_i in enumerate(self.centre):
+        gscm = np.sum(self.gas["mass"][i]*self.gas["coords"][i])
+        dmcm = np.sum(self.dm["mass"][i]*self.dm["coords"][i])
+        stcm = np.sum(self.stars["mass"]*self.stars["coords"][i])
+        bhcm = np.sum(self.bh["mass"]*self.bh["coords"][i])
+        cnt_m  = (gscm+dmcm+stcm+bhcm)/self.M_tot
+        
+        np.testing.assert_almost_equal(np.array(cnt_m)/self.centre,1,decimal=3)
+        return 0
+    def get_pkl_path(self):
+        if not getattr(self,"pkl_path",False):
+            self.pkl_path = f"{self.gal_snap_dir}/Gn{self.Gn}SGn{self.SGn}.pkl"
+        return self.pkl_path
+        
+    def set_gal_path(self):
+        self.gal_path,self.gal_snap_dir = get_gal_path(self,ret_snap_dir=True)
+        mkdir(self.gal_snap_dir)
+        self.get_pkl_path()
+        return 0
+    def store_gal(self):
+        if getattr(self,"pkl_path",False):
+            self.set_gal_path()
+        # store this galaxy
+        with open(self.pkl_path,"wb") as f:
+            pickle.dump(self,f)
+
+        
+    def __str__(self):
+        str_gal = f"Gal {self.Gn}.{self.SGn}"
+        str_gal += f", at z={str(np.round(self.z,3))}, with {'%.1E'%Decimal(self.N_tot_part)} part. of tot Mass {'%.1E'%Decimal(self.M_tot)} [M_sun]"
+        str_gal +=f"divided in N \n\
+                Stars:{'%.1E'%Decimal(self.N_stars)}\n\
+                Gas:{'%.1E'%Decimal(self.N_gas)}\n\
+                DM:{'%.1E'%Decimal(self.N_dm)}\n\
+                BH:{'%.1E'%Decimal(self.N_bh)}\n"
+        str_gal +=f"and Mass in \n\
+                    Stars:{'%.1E'%Decimal(self.M_stars)} [M_sun]\n\
+                    Gas:{'%.1E'%Decimal(self.M_gas)} [M_sun]\n\
+                    DM:{'%.1E'%Decimal(self.M_dm)} [M_sun]\n\
+                    BH:{'%.1E'%Decimal(self.M_bh)} [M_sun]\n"
+        return str_gal
+    def __eq__(self,other_gal):
+        kw_one = self._get_kw_gal() 
+        kw_two = other_gal._get_kw_gal() 
+        if kw_one.keys()!=kw_two.keys():
+            return False
+        else:
+            for k in kw_one.keys():
+                if kw_one[k]!=kw_two[k]:
+                    return False
+        return True
+        
+def _count_part(part):
+    return len(part["mass"])
+
+def _mass_part(part):
+    return np.sum(part["mass"])
+
+def read_galaxy(itype,gn,sgn,z,snap,boxsize,h,centre):
+    """ For a given galaxy (defined by its GroupNumber, SubGroupNumber 
+    and z/snap) extract the coordinates and mass of all particles of a 
+    selected type.
+    Coordinates are then wrapped around the centre to account for periodicity. """
+
+    data = {}
+
+    # Load data, then mask to selected GroupNumber and SubGroupNumber.
+    gns  = read_dataset(itype, 'GroupNumber', z,snap)
+    sgns = read_dataset(itype, 'SubGroupNumber',z,snap)
+    mask = np.logical_and(gns == gn, sgns == sgn)
+    if itype == 1:
+        data['mass'] = read_dataset_dm_mass(z, snap)[mask] * u.g.to(u.Msun)
+        # DM does NOT have a smoothing scale
+    else:
+        data['mass'] = read_dataset(itype, 'Mass', z, snap)[mask] * u.g.to(u.Msun)
+        # Add Smoothing lenght -> see Co-moving SPH smoothing kernel in eagle-particle paper
+        # sec. 3
+        data['smooth'] = read_dataset(itype, 'SmoothingLength', z, snap)[mask] * u.cm.to(u.Mpc)
+        # chachacha real smooth
+    data['coords'] = read_dataset(itype, 'Coordinates', z, snap)[mask] * u.cm.to(u.Mpc)
+
+    # Periodic wrap coordinates around centre.
+    boxsize = boxsize/h
+    data['coords'] = np.mod(data['coords']-centre+0.5*boxsize,boxsize)+centre-0.5*boxsize
+
+
+    return data
+
+
+
+class RotationCurve:
+
+    def __init__(self, Gn, SGn,  CMx,CMy,CMz,M=None,sim=std_sim,z=None,snap=None):
+        self.sim    = sim
+        z,snap      = get_z_snap(z,snap)
+        self.z      = z
+        self.snap   = snap
+        self.centre = np.array([CMx,CMy,CMz])
+        self.Gn     = Gn
+        self.SGn    = SGn
+        # centre only needed here to correct the coordinates
+        # it could in theory get recovered from the particles themselves
+        # as it follows X = Sum miXi / Sum mi
+
+        # Load data.
+        self.a, self.h, self.boxsize = read_snap_header(z=self.z,
+                                                        snap=self.snap,
+                                                        sim=self.sim)
+
+        self.gas    = self.read_galaxy(0)
+        self.dm     = self.read_galaxy(1)
+        self.stars  = self.read_galaxy(4)
+        self.bh     = self.read_galaxy(5)
+        # Plot.
+        self.plot()
+        
+    def read_galaxy(self,itype):
+        kw_rg = {"gn":self.Gn,"sgn":self.SGn,
+                 "snap":self.snap,"z":self.z,
+                 "boxsize":self.boxsize,"h":self.h,"centre":self.centre}
+        return read_galaxy(itype=itype,**kw_rg)
+        
+    def compute_rotation_curve(self, arr):
+        """ Compute the rotation curve. """
+
+        # Compute distance to centre.
+        r = np.linalg.norm(arr['coords'] - self.centre, axis=1)
+        mask = np.argsort(r)
+        r = r[mask]
+
+        # Compute cumulative mass.
+        cmass = np.cumsum(arr['mass'][mask])
+
+        # Compute velocity.
+        myG = G.to(u.km**2 * u.Mpc * u.Msun**-1 * u.s**-2).value
+        v = np.sqrt((myG * cmass) / r)
+
+        # Return r in Mpc and v in km/s.
+        return r, v
+
+    def plot(self):
+        plt.figure()
+
+        # All parttypes together.
+        combined = {}
+        combined['mass'] = np.concatenate((self.gas['mass'], self.dm['mass'],
+            self.stars['mass'], self.bh['mass']))
+        combined['coords'] = np.vstack((self.gas['coords'], self.dm['coords'],
+            self.stars['coords'], self.bh['coords']))
+        
+        # Loop over each parttype.
+        for x, lab in zip([self.gas, self.dm, self.stars, combined],
+                        ['Gas', 'Dark Matter', 'Stars', 'All']):
+            r, v = self.compute_rotation_curve(x)
+            plt.plot(r*1000., v, label=lab)
+
+        # Save plot.
+        plt.legend(loc='center right')
+        plt.minorticks_on()
+        plt.ylabel('Velocity [km/s]')
+        plt.xlabel('r [kpc]')
+        plt.xlim(1, 50) 
+        plt.tight_layout()
+        plt.savefig('RotationCurve.pdf')
+        plt.close()
+
+if __name__ == '__main__':
+    centre = np.array([12.08808994,4.47437191,1.41333473])
+    x = RotationCurve(gn=1, sgn=0, centre = centre,z=0)
+
+
+
