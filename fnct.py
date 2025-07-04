@@ -313,14 +313,19 @@ class Galaxy:
         if not hasattr(self,"M_tot"):
             self._mass_tot_part()
         
-        for i,cnt_m_i in enumerate(self.centre):
-        gscm = np.sum(self.gas["mass"][i]*self.gas["coords"][i])
-        dmcm = np.sum(self.dm["mass"][i]*self.dm["coords"][i])
-        stcm = np.sum(self.stars["mass"]*self.stars["coords"][i])
-        bhcm = np.sum(self.bh["mass"]*self.bh["coords"][i])
-        cnt_m  = (gscm+dmcm+stcm+bhcm)/self.M_tot
+        m_gas   = np.broadcast_to(self.gas["mass"],(3,self.N_gas)).T
+        m_dm    = np.broadcast_to(self.dm["mass"],(3,self.N_dm)).T
+        m_stars = np.broadcast_to(self.stars["mass"],(3,self.N_stars)).T
+        m_bh    = np.broadcast_to(self.bh["mass"],(3,self.N_bh)).T
         
-        np.testing.assert_almost_equal(np.array(cnt_m)/self.centre,1,decimal=3)
+        cm_gs   = np.sum(self.gas["coords"]*m_gas,axis=0)
+        cm_dm   = np.sum(self.dm["coords"]*m_dm,axis=0)
+        cm_st   = np.sum(self.stars["coords"]*m_stars,axis=0)
+        cm_bh   = np.sum(self.bh["coords"]*m_bh,axis=0)
+        
+        cnt_m  = (cm_gs+cm_dm+cm_st+cm_bh)/self.M_tot
+        # the following is not true - 1) i did something wrong in the progs 2) it is not the CMs? 3) the precision of one of the calc. is different and I am over -> it is compatible only to ~80%
+        np.testing.assert_almost_equal(np.array(cnt_m)/self.centre,np.ones(3),decimal=3)
         return 0
     def get_pkl_path(self):
         if not getattr(self,"pkl_path",False):
