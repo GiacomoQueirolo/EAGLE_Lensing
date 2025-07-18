@@ -104,20 +104,23 @@ def get_files(sim,z=None,snap=None,_i_="*"):
     #print("#DEBUG")
     #print(file_string)
     files = glob.glob(file_string)
+    # checking that the files are not empty
+    assert files != []
     return files
 
 # ugly fnct but should be correct:
 def get_simsize(sim_name):
     return int(sim_name.split("L")[1].split("N")[0])
-
+"""
+# discontinued
 def stnd_read_dataset(itype, att,
                  z=None,snap=None,
                  sim=std_sim):
-    """ Read a selected dataset:
-        - itype is the PartType (stars,gas etc) 
-        - att is the attribute name (Group, Subgroup etc). 
-        If no redshift/snapshots are define, take all of them
-    """
+    # Read a selected dataset:
+    #    - itype is the PartType (stars,gas etc) 
+    #    - att is the attribute name (Group, Subgroup etc). 
+    #    If no redshift/snapshots are define, take all of them
+    
     # Output array.
     data  = []
     files = get_files(sim=sim,z=z,snap=snap)
@@ -147,6 +150,7 @@ def stnd_read_dataset(itype, att,
         data = np.multiply(data, cgs * a**aexp * h**hexp, dtype='f8')
 
     return data
+"""
 
 def read_dataset(itype, att, z=None, snap=None, sim=std_sim):
     files = get_files(sim=sim, z=z, snap=snap)
@@ -191,15 +195,20 @@ def read_snap_header(z=None,snap=None,sim=std_sim):
         print("file=",file)
     file = file[0]
     with h5py.File(file, 'r') as f:
-        a       = f['Header'].attrs.get('Time')         # Scale factor.
-        h       = f['Header'].attrs.get('HubbleParam')  # h.
-        boxsize = f['Header'].attrs.get('BoxSize')      # L [Mph/h].
-    return a, h, boxsize
+        a       = f['Header'].attrs.get('Time')                # Scale factor.
+        h       = f['Header'].attrs.get('HubbleParam')         # h = H0/(100km/s/Mpc)
+        aexp    = f['Header'].attrs.get('aexp-scale-exponent') # Exponent of Scale factor.
+        hexp    = f['Header'].attrs.get('h-scale-exponent')    # Exponent of Scale factor.
+        boxsize = f['Header'].attrs.get('BoxSize')             # L [Mph/h].
+        print("DEBUG")
+        print(f["Header"].attrs.keys())
+    # careful - aexp is 1, but hexp should be -1 
+    return a**aexp, h**hexp, boxsize
 
 def read_dataset_dm_mass(z,snap,sim=std_sim):
     """Special case for the mass of dark matter particles."""
     # Output array.
-    files =get_files(sim=sim,z=z,snap=snap,_i_="0")
+    files = get_files(sim=sim,z=z,snap=snap,_i_="0")
     if len(files)!=1:
         raise RuntimeError("Define the z and/or snap")
     with h5py.File(files[0], 'r') as f:
@@ -214,7 +223,7 @@ def read_dataset_dm_mass(z,snap,sim=std_sim):
         aexp = f['PartType0/Mass'].attrs.get('aexp-scale-exponent')
         hexp = f['PartType0/Mass'].attrs.get('h-scale-exponent')
     # Convert to phyiscal
-    m = np.multiply(m, cgs*a**aexp*h**hexp, dtype='f8')
+    m = np.multiply(m, cgs*(a**aexp)*(h**hexp), dtype='f8')
     return m
 
 def get_gal_path(Gal,ret_snap_dir=False):
@@ -248,10 +257,12 @@ class Galaxy:
         # as it follows X = Sum miXi / Sum mi
 
         # Load data.
-        self.a, self.h, self.boxsize = self.read_snap_header()
+        # note a and h have already the exponent (for a it's 1, for h it's -1)
+        self.fact_a, self.fact_h, self.boxsize = self.read_snap_header()
         # check if gal exists and if it's the same, if so load that instead
         try:
             GL = load_whatever(self.gal_path)
+            print("Gal loaded")
             if self.__eq__(GL):
                 # this is what takes the longest
                 self.gas   = GL.gas
@@ -262,6 +273,7 @@ class Galaxy:
             else:
                 raise RuntimeError("Galaxy file exists but is not the same")
         except:
+            print("Gal not loaded, read from data")
             self.gas    = self.read_galaxy(0)
             self.dm     = self.read_galaxy(1)
             self.stars  = self.read_galaxy(4)
@@ -285,7 +297,7 @@ class Galaxy:
     def _get_kw_gal(self):
         kw_gal = {"gn":self.Gn,"sgn":self.SGn,
                  "snap":self.snap,"z":self.z,
-                 "boxsize":self.boxsize,"h":self.h,"centre":self.centre}
+                 "boxsize":self.boxsize,"fact_h":self.fact_h,"centre":self.centre}
         return kw_gal 
         
     def get_z_snap(self,z,snap):
@@ -300,11 +312,12 @@ class Galaxy:
         return self.N_tot_part
 
     def _mass_tot_part(self):
-        self.M_gas = _mass_part(self.gas)
-        self.M_dm = _mass_part(self.dm)
+        self.M_gas   = _mass_part(self.gas)
+        self.M_dm    = _mass_part(self.dm)
         self.M_stars = _mass_part(self.stars)
-        self.M_bh = _mass_part(self.bh)
-        self.M_tot =  self.M_gas+self.M_dm+self.M_stars +self.M_bh
+        self.M_bh    = _mass_part(self.bh)
+        
+        self.M_tot   =  self.M_gas+self.M_dm+self.M_stars +self.M_bh
         np.testing.assert_almost_equal(float(self.M_tot)/float(self.M),1,decimal=3)
         return self.M_tot
 
@@ -317,15 +330,31 @@ class Galaxy:
         m_dm    = np.broadcast_to(self.dm["mass"],(3,self.N_dm)).T
         m_stars = np.broadcast_to(self.stars["mass"],(3,self.N_stars)).T
         m_bh    = np.broadcast_to(self.bh["mass"],(3,self.N_bh)).T
+        """
+        # doesn't work
+        m_gas   = self.gas["mass"][:np.newaxis]
+        m_dm    = self.dm["mass"][:np.newaxis]
+        m_stars = self.stars["mass"][:np.newaxis]
+        m_bh    = self.bh["mass"][:np.newaxis]
+        """
+        print("DEBUG - TEST \n from eq.1 https://arxiv.org/pdf/1706.09899")
+        conv2comov = 1/(self.fact_a*self.fact_h)
         
-        cm_gs   = np.sum(self.gas["coords"]*m_gas,axis=0)
-        cm_dm   = np.sum(self.dm["coords"]*m_dm,axis=0)
-        cm_st   = np.sum(self.stars["coords"]*m_stars,axis=0)
-        cm_bh   = np.sum(self.bh["coords"]*m_bh,axis=0)
+        cm_gs   = np.sum(self.gas["coords"]*m_gas*conv2comov,axis=0)
+        cm_dm   = np.sum(self.dm["coords"]*m_dm*conv2comov,axis=0)
+        cm_st   = np.sum(self.stars["coords"]*m_stars*conv2comov,axis=0)
+        cm_bh   = np.sum(self.bh["coords"]*m_bh*conv2comov,axis=0)
         
-        cnt_m  = (cm_gs+cm_dm+cm_st+cm_bh)/self.M_tot
+        cnt_m  = np.array((cm_gs+cm_dm+cm_st+cm_bh)/(self.M))
         # the following is not true - 1) i did something wrong in the progs 2) it is not the CMs? 3) the precision of one of the calc. is different and I am over -> it is compatible only to ~80%
-        np.testing.assert_almost_equal(np.array(cnt_m)/self.centre,np.ones(3),decimal=3)
+        print("DEBUG")
+        print(cnt_m/self.centre,cnt_m,self.centre)
+        eps = 1e-6
+        if np.all(np.abs(self.centre)<eps):
+            print("center is set to zero")
+            np.testing.assert_almost_equal(np.array(cnt_m),np.zero(3),decimal=3)
+        else:
+            np.testing.assert_almost_equal(np.array(cnt_m)/self.centre,np.ones(3),decimal=3)
         return 0
     def get_pkl_path(self):
         if not getattr(self,"pkl_path",False):
@@ -376,7 +405,7 @@ def _count_part(part):
 def _mass_part(part):
     return np.sum(part["mass"])
 
-def read_galaxy(itype,gn,sgn,z,snap,boxsize,h,centre):
+def read_galaxy(itype,gn,sgn,z,snap,boxsize,fact_h,centre):
     """ For a given galaxy (defined by its GroupNumber, SubGroupNumber 
     and z/snap) extract the coordinates and mass of all particles of a 
     selected type.
@@ -400,14 +429,13 @@ def read_galaxy(itype,gn,sgn,z,snap,boxsize,h,centre):
     data['coords'] = read_dataset(itype, 'Coordinates', z, snap)[mask] * u.cm.to(u.Mpc)
 
     # Periodic wrap coordinates around centre.
-    boxsize = boxsize/h
+    boxsize = boxsize*fact_h
     data['coords'] = np.mod(data['coords']-centre+0.5*boxsize,boxsize)+centre-0.5*boxsize
-
 
     return data
 
 
-
+"""
 class RotationCurve:
 
     def __init__(self, Gn, SGn,  CMx,CMy,CMz,M=None,sim=std_sim,z=None,snap=None):
@@ -423,7 +451,7 @@ class RotationCurve:
         # as it follows X = Sum miXi / Sum mi
 
         # Load data.
-        self.a, self.h, self.boxsize = read_snap_header(z=self.z,
+        self.fact_a, self.fact_h, self.boxsize = read_snap_header(z=self.z,
                                                         snap=self.snap,
                                                         sim=self.sim)
 
@@ -437,11 +465,11 @@ class RotationCurve:
     def read_galaxy(self,itype):
         kw_rg = {"gn":self.Gn,"sgn":self.SGn,
                  "snap":self.snap,"z":self.z,
-                 "boxsize":self.boxsize,"h":self.h,"centre":self.centre}
+                 "boxsize":self.boxsize,"fact_h":self.fact_h,"centre":self.centre}
         return read_galaxy(itype=itype,**kw_rg)
         
     def compute_rotation_curve(self, arr):
-        """ Compute the rotation curve. """
+        #Compute the rotation curve. 
 
         # Compute distance to centre.
         r = np.linalg.norm(arr['coords'] - self.centre, axis=1)
@@ -490,3 +518,4 @@ if __name__ == '__main__':
 
 
 
+"""
