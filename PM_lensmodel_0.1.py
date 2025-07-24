@@ -5,7 +5,7 @@ from astropy import constants as const
 from astropy import units as u
 from astropy.cosmology import FlatLambdaCDM
 
-from tools import *
+from python_tools.tools import mkdir
 from fnct import std_sim
 from get_gal_indexes import get_rnd_gal
 

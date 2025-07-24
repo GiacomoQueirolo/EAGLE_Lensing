@@ -3,7 +3,7 @@
 # SLURM options:
 
 #SBATCH --job-name=SrtbutHv_job
-#SBATCH --output=large_pythjob-%j.out
+#SBATCH --output=srtBhv_pythjob-%j.out
 #SBATCH --partition=htc               # Partition choice (htc by default)
 
 #SBATCH --ntasks=1                    # Run a single task

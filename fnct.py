@@ -9,8 +9,8 @@ from astropy.constants import G
 import matplotlib.pyplot as plt  
 from concurrent.futures import ThreadPoolExecutor
 
-from get_res import load_whatever
-from tools import mkdir
+from python_tools.get_res import load_whatever
+from python_tools.tools import mkdir
 ####
 
 # Setup and General Structure
@@ -200,7 +200,7 @@ def read_snap_header(z=None,snap=None,sim=std_sim):
     if len(file)!=1:
         raise RuntimeError("Warning: define only one snapshot")
         print("file=",file)
-    file = file[0]
+    file      = file[0]
     aexp,hexp = {},{}
     with h5py.File(file, 'r') as f:
         a       = f['Header'].attrs.get('Time')                # Scale factor.
@@ -213,6 +213,7 @@ def read_snap_header(z=None,snap=None,sim=std_sim):
         for att in atts:
             aexp[att] = f[f"PartType0/{att}"].attrs["aexp-scale-exponent"]  # Exponent of Scale factor.
             hexp[att] = f[f"PartType0/{att}"].attrs["h-scale-exponent"] # Exponent of h
+    print(aexp,hexp)
     return a,aexp,h,hexp,boxsize
 
 def read_dataset_dm_mass(z,snap,sim=std_sim):
@@ -362,7 +363,6 @@ class Galaxy:
         # and convert in comov. coordinates
         print(self.m_propr2comov,self.xy_propr2comov)
         self.m_propr2comov = 1
-        self.xy_propr2comov = 1
         m_gas = self.m_propr2comov*np.broadcast_to(self.gas["mass"],(3,self.N_gas)).T
         m_dm  = self.m_propr2comov*np.broadcast_to(self.dm["mass"],(3,self.N_dm)).T
         m_st  = self.m_propr2comov*np.broadcast_to(self.stars["mass"],(3,self.N_stars)).T
@@ -386,7 +386,7 @@ class Galaxy:
         cm_st   = np.sum(xy_st*m_st,axis=0)
         cm_bh   = np.sum(xy_bh*m_bh,axis=0)
         
-        cnt_m  = np.array((cm_gs+cm_dm+cm_st+cm_bh)/(self.M))
+        cnt_m  = np.array((cm_gs+cm_dm+cm_st+cm_bh)/(self.M*self.m_propr2comov))
         # the following is not true - 1) i did something wrong in the progs 2) it is not the CMs? 3) the precision of one of the calc. is different and I am over -> it is compatible only to ~80%
         print("DEBUG")
         print(cnt_m/self.centre,cnt_m,self.centre)
