@@ -81,6 +81,7 @@ def get_rnd_gal(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",pkl_name="mass
                 z_gl = get_z(int(snap))
                 if z_gl<int(max_z) and z_gl>int(min_z):
                     for gl in os.listdir(gal_dir+"/"+snap_dir):
+                        print(gal_dir+"/"+snap_dir+"/"+gl)
                         Gal = load_whatever(gal_dir+"/"+snap_dir+"/"+gl)
                         if Gal.M_tot>float(min_mass):
                             print("Found previous Gal "+str(Gal))
@@ -102,5 +103,7 @@ def _get_rnd_gal(data):
             kw[k] = data[k]
         else:
             kw[k] = data[k][rnd_i]
+
     Gal = Galaxy(**kw)
     return Gal
+

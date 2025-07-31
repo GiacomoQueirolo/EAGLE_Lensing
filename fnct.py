@@ -28,6 +28,7 @@ part_data_path = "/pbs/home/g/gqueirolo/EAGLE/data/"
 # use the following only as test case
 #std_sim  = "RefL0012N0188"
 std_sim ="RefL0025N0752"
+test_sim = "RefL0012N0188"
 sim_path = part_data_path+std_sim+"/"
 # Where to store the galaxies
 gal_dir = sim_path+"/Gals"
@@ -81,7 +82,7 @@ def get_files(sim,z=None,snap=None,_i_="*"):
     """
     Find the files 
     If _i_ is specified, only that specific subsection of the snapshot (useful for DM)
-    If no redshift/snapshots are define, take all of them
+    If no redshift/snapshots are defined, take all of them
     """
     
     sim_path = part_data_path+"/"+sim
@@ -185,8 +186,9 @@ def read_dataset(itype, att, z=None, snap=None, sim=std_sim):
     else:
         data = np.concatenate(data_chunks)
 
-    # Apply conversion if not integer
+    # Apply conversion if not integer-> convers. to proper coord/mass
     if data.dtype not in (np.int32, np.int64):
+        print(data,meta['cgs'] * meta['a']**meta['aexp'] * meta['h']**meta['hexp'])
         data = np.multiply(data, meta['cgs'] * meta['a']**meta['aexp'] * meta['h']**meta['hexp'], dtype='f8')
 
     return data
@@ -205,15 +207,14 @@ def read_snap_header(z=None,snap=None,sim=std_sim):
     with h5py.File(file, 'r') as f:
         a       = f['Header'].attrs.get('Time')                # Scale factor.
         h       = f['Header'].attrs.get('HubbleParam')         # h = H0/(100km/s/Mpc)
-        boxsize = f['Header'].attrs.get('BoxSize')             # L [Mph/h].
+        boxsize = f['Header'].attrs.get('BoxSize')             # L [cMph/h].
 
         # aexp and hexp are different for the diff. variable (mainly coord and mass)
         # but should be the same between different type of particles and redshift bins
         atts = "GroupNumber","SubGroupNumber","Mass","Coordinates","SmoothingLength"
         for att in atts:
             aexp[att] = f[f"PartType0/{att}"].attrs["aexp-scale-exponent"]  # Exponent of Scale factor.
-            hexp[att] = f[f"PartType0/{att}"].attrs["h-scale-exponent"] # Exponent of h
-    print(aexp,hexp)
+            hexp[att] = f[f"PartType0/{att}"].attrs["h-scale-exponent"]     # Exponent of h
     return a,aexp,h,hexp,boxsize
 
 def read_dataset_dm_mass(z,snap,sim=std_sim):
@@ -233,7 +234,7 @@ def read_dataset_dm_mass(z,snap,sim=std_sim):
         cgs = f['PartType0/Mass'].attrs.get('CGSConversionFactor')
         aexp = f['PartType0/Mass'].attrs.get('aexp-scale-exponent')
         hexp = f['PartType0/Mass'].attrs.get('h-scale-exponent')
-    # Convert to phyiscal
+    # Convert to proper/physical mass
     m = np.multiply(m, cgs*(a**aexp)*(h**hexp), dtype='f8')
     return m
 
@@ -252,24 +253,20 @@ class Galaxy:
                  sim=std_sim,z=None,snap=None,query=""):
         self.sim    = sim
         z,snap      = self.get_z_snap(z,snap)
-        self.z      = z
         self.snap   = snap
-        self.centre = np.array([CMx,CMy,CMz])
+        self.z      = z
+        self.a,self.aexp,self.h,self.hexp,self.boxsize = self.read_snap_header()
+        # define all coordinates in Mpc / cMpc but not Mpc/h
+        self.centre = np.array([CMx,CMy,CMz]) # cMpc
         self.Gn     = Gn
         self.SGn    = SGn
-        self.M      = M # not really useful
+        self.M      = M
         self.query  = query # query from which this gal is selected (important later for sel. bias)
+        # Load data.
+        # note a and h have already the exponent (for a it's 1, for h it's -1)
 
         # Define/Create Gal path
         self.set_gal_path()
-         
-        # centre only needed here to correct the coordinates
-        # it could in theory get recovered from the particles themselves
-        # as it follows X = Sum miXi / Sum mi
-
-        # Load data.
-        # note a and h have already the exponent (for a it's 1, for h it's -1)
-        self.a,self.aexp,self.h,self.hexp,self.boxsize = self.read_snap_header()
 
         # useful to check Center of Mass
         self.xy_propr2comov = self.prop2comov("Coordinates") 
@@ -314,18 +311,37 @@ class Galaxy:
         # to obtain the corresponding comoving properties
         # from eq.1-2 https://arxiv.org/pdf/1706.09899
 
-        # note: in principle aexp and hexp COULD be different for
-        # each type of particle and snapshotbut that would make no sense
+        # note: in principle,numerically, aexp and hexp COULD be different for
+        # each type of particle and snapshot but that would make no sense
         # so I'll assume them constant
 
         # in principle the factor is 1/(a^0*h^-1) = h for mass
         # and 1/(a^1 *h^-1) = h/a for coords
-        # but it should be more correctly defined as
+        # but is more correctly defined as
         # 1/(a^aexp * h^hexp)
+        """
         aexp = self.aexp[varType]
         hexp = self.hexp[varType]
+        if varType=="Coordinates":
+            np.testing.assert_almost_equal(aexp,1)
+            np.testing.assert_almost_equal(hexp,-1)
+        elif varType=="Mass":
+            np.testing.assert_almost_equal(aexp,0)
+            np.testing.assert_almost_equal(hexp,-1)
+        hexp = 0
         return  1/((self.a**aexp)*(self.h**hexp))
-            
+        """
+    
+        # AS DEFINED: ALL COORDS IN Mpc/cMpc. NO 1/h FACTOR! 
+        # hence the correction factor must not correct for h
+        aexp = self.aexp[varType]
+        hexp = 0
+        # physically motivated verification 
+        if varType=="Coordinates":
+            np.testing.assert_almost_equal(aexp,1)
+        elif varType=="Mass":
+            np.testing.assert_almost_equal(aexp,0)
+        return  1/(self.a**aexp)
     
     def _get_kw_gal(self):
         kw_gal = {"gn":self.Gn,"sgn":self.SGn,
@@ -337,10 +353,10 @@ class Galaxy:
         return get_z_snap(z,snap)
         
     def _count_tot_part(self):
-        self.N_gas = _count_part(self.gas)
-        self.N_dm = _count_part(self.dm)
-        self.N_stars = _count_part(self.stars)
-        self.N_bh = _count_part(self.bh)
+        self.N_gas      = _count_part(self.gas)
+        self.N_dm       = _count_part(self.dm)
+        self.N_stars    = _count_part(self.stars)
+        self.N_bh       = _count_part(self.bh)
         self.N_tot_part =  self.N_gas+self.N_dm+self.N_stars +self.N_bh
         return self.N_tot_part
 
@@ -361,35 +377,30 @@ class Galaxy:
 
         # get the mass, restructure it in 3,N_part
         # and convert in comov. coordinates
-        print(self.m_propr2comov,self.xy_propr2comov)
-        self.m_propr2comov = 1
-        m_gas = self.m_propr2comov*np.broadcast_to(self.gas["mass"],(3,self.N_gas)).T
-        m_dm  = self.m_propr2comov*np.broadcast_to(self.dm["mass"],(3,self.N_dm)).T
-        m_st  = self.m_propr2comov*np.broadcast_to(self.stars["mass"],(3,self.N_stars)).T
-        m_bh  = self.m_propr2comov*np.broadcast_to(self.bh["mass"],(3,self.N_bh)).T
-        """
-        # doesn't work
-        m_gas   = self.gas["mass"][:np.newaxis]
-        m_dm    = self.dm["mass"][:np.newaxis]
-        m_stars = self.stars["mass"][:np.newaxis]
-        m_bh    = self.bh["mass"][:np.newaxis]
-        """
-        print("DEBUG")
+        #print("mass_propr2comov,      xy_propr2comov:")
+        #print(self.m_propr2comov,self.xy_propr2comov)
+        
         # conv. in comov. coordinates
+        xy_dm  = self.dm["coords"]*self.xy_propr2comov
         xy_gas = self.gas["coords"]*self.xy_propr2comov
         xy_st  = self.stars["coords"]*self.xy_propr2comov
-        xy_dm  = self.dm["coords"]*self.xy_propr2comov
         xy_bh  = self.bh["coords"]*self.xy_propr2comov
+
+        # m in comov coord
+        m_dm  = self.m_propr2comov*np.broadcast_to(self.dm["mass"],(3,self.N_dm)).T
+        m_gas = self.m_propr2comov*np.broadcast_to(self.gas["mass"],(3,self.N_gas)).T
+        m_st  = self.m_propr2comov*np.broadcast_to(self.stars["mass"],(3,self.N_stars)).T
+        m_bh  = self.m_propr2comov*np.broadcast_to(self.bh["mass"],(3,self.N_bh)).T
         
-        cm_gs   = np.sum(xy_gas*m_gas,axis=0)
         cm_dm   = np.sum(xy_dm*m_dm,axis=0)
+        cm_gs   = np.sum(xy_gas*m_gas,axis=0)
         cm_st   = np.sum(xy_st*m_st,axis=0)
         cm_bh   = np.sum(xy_bh*m_bh,axis=0)
+
+        cnt_m  = (cm_dm+cm_gs+cm_st+cm_bh)/(self.M*self.m_propr2comov)
         
-        cnt_m  = np.array((cm_gs+cm_dm+cm_st+cm_bh)/(self.M*self.m_propr2comov))
-        # the following is not true - 1) i did something wrong in the progs 2) it is not the CMs? 3) the precision of one of the calc. is different and I am over -> it is compatible only to ~80%
-        print("DEBUG")
-        print(cnt_m/self.centre,cnt_m,self.centre)
+        #print("DEBUG")
+        #print(cnt_m/self.centre,cnt_m,self.centre)
         eps = 1e-6
         if np.all(np.abs(self.centre)<eps):
             print("center is set to zero")
@@ -397,6 +408,7 @@ class Galaxy:
         else:
             np.testing.assert_almost_equal(np.array(cnt_m)/self.centre,np.ones(3),decimal=3)
         return 0
+        
     def get_pkl_path(self):
         if not getattr(self,"pkl_path",False):
             self.pkl_path = f"{self.gal_snap_dir}/Gn{self.Gn}SGn{self.SGn}.pkl"
@@ -458,6 +470,7 @@ def read_galaxy(itype,gn,sgn,z,snap,boxsize,h,centre):
     gns  = read_dataset(itype, 'GroupNumber', z,snap)
     sgns = read_dataset(itype, 'SubGroupNumber',z,snap)
     mask = np.logical_and(gns == gn, sgns == sgn)
+    
     if itype == 1:
         data['mass'] = read_dataset_dm_mass(z, snap)[mask] * u.g.to(u.Msun)
         # DM does NOT have a smoothing scale
@@ -560,3 +573,4 @@ if __name__ == '__main__':
 
 
 """
+
