@@ -9,7 +9,7 @@
 #SBATCH --ntasks=1                    # Run a single task
 #SBATCH --cpus-per-task=10
 #SBATCH --mem-per-cpu=4G                    # Memory in MB per default
-#SBATCH --time=1:00:00             # Max time limit = 7 days
+#SBATCH --time=2:00:00             # Max time limit = 7 days
 
 #SBATCH --mail-user=giacomo.queirolo@umontpellier.fr          # Where to send the e-mail
 #SBATCH --mail-type=NONE          # Mail events (NONE, BEGIN, END, FAIL, ALL)

@@ -188,7 +188,7 @@ def read_dataset(itype, att, z=None, snap=None, sim=std_sim):
 
     # Apply conversion if not integer-> convers. to proper coord/mass
     if data.dtype not in (np.int32, np.int64):
-        print(data,meta['cgs'] * meta['a']**meta['aexp'] * meta['h']**meta['hexp'])
+        #print(data,meta['cgs'] * meta['a']**meta['aexp'] * meta['h']**meta['hexp'])
         data = np.multiply(data, meta['cgs'] * meta['a']**meta['aexp'] * meta['h']**meta['hexp'], dtype='f8')
 
     return data
