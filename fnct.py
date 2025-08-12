@@ -415,15 +415,19 @@ class Galaxy:
         
         #print("DEBUG")
         #print(cnt_m/self.centre,cnt_m,self.centre)
+        """
         eps = 1e-6
         if np.all(np.abs(self.centre)<eps):
             print("Galaxy centered around zero")
-            center_test = np.array(cnt_m)    
+            center_actual = np.array(cnt_m)    
+            center_desired = np.zeros(3)
         else:
-            center_test = np.array(cnt_m)-self.centre
+        """
+        center_actual  = np.array(cnt_m)
+        center_desired = self.centre
         # is very odd that for some galaxy the center is off by more than 0.01 for 1 of the coords
         # maybe different wrapping?
-        self.verbose_assert_almost_equal(center_test,np.zeros(3),decimal=1,msg_title="Centre")      
+        self.verbose_assert_almost_equal(center_desired,center_desired,decimal=1,msg_title="Centre")      
         return 0
         
     def get_pkl_path(self):

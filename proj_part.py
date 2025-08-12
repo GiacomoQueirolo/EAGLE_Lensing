@@ -280,6 +280,8 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     #-> the kde give density as function of the pixel number, not the coordinates
     if verbose:
         print("fit_kde sum",np.sum(fit_kde))
+        print("fit_kde median",np.median(fit_kde))
+        print("fit_kde max",np.max(fit_kde))
     dens    = np.reshape(fit_kde, Xg.shape).T # Msun/pix^2 
     if plot:
         """
@@ -291,21 +293,26 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
         plt.close()
         print("Saved "+namefig)
         """
-        ramin  = x_kde.min()
-        ramax  = x_kde.max()
-        decmin = y_kde.min()
-        decmax = y_kde.max()
-        extent = [ramin,ramax,decmin,decmax]
-        dens   = fit_kde.reshape(RAg.shape).T
-        plt.imshow(dens,extent=extent, cmap=plt.cm.gist_earth_r)
-        plt.scatter(x_kde,y_kde,c="w",marker=".")
-        plt.contour(Xg, Yg, dens.T,extent=extent)
-        plt.xlim([ramin,ramax])
-        plt.ylim([decmin,decmax])
-        namefig = f"{Gal.proj_dir}/kde_densmap.pdf"
-        plt.savefig(namefig)
-        plt.close()
-        print("Saved "+namefig)
+        try:
+            ramin  = x_kde.min()
+            ramax  = x_kde.max()
+            decmin = y_kde.min()
+            decmax = y_kde.max()
+            extent = [ramin,ramax,decmin,decmax]
+            dens   = fit_kde.reshape(Xg.shape).T
+            plt.imshow(dens.value,extent=extent, cmap=plt.cm.gist_earth_r)
+            plt.scatter(x_kde,y_kde,c="w",marker=".")
+            plt.contour(Xg, Yg, dens.T.value,extent=extent)
+            plt.xlim([ramin,ramax])
+            plt.ylim([decmin,decmax])
+            namefig = f"{Gal.proj_dir}/kde_densmap.pdf"
+            plt.savefig(namefig)
+            plt.close()
+            print("Saved "+namefig)
+        except TypeError as e:
+            print("while plotting, encountered the following error:")
+            print(e)
+            print("Ignored and continued w/o plotting")
 
 
 
