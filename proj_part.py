@@ -8,53 +8,82 @@
 
 import os
 import csv
+import glob
 import pickle
 import numpy as np
 from copy import copy
+import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
 
-from astropy import constants as const
 from astropy import units as u
+from astropy import constants as const
 from astropy.cosmology import FlatLambdaCDM
+from lenstronomy.LensModel import convergence_integrals
 
 #from lenstronomy.Util import util
 
-from fnct import std_sim
-import matplotlib.pyplot as plt
+from fnct import gal_dir,std_sim
 from get_gal_indexes import get_rnd_gal
 
 from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
 
 
-filename = "particles_EAGLE.csv"
-path     = "./EAGLE_prt_data/"
-dir_name = "proj_part"
-
-Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False)
-
-Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}/"
-mkdir(Gal.proj_dir)
-Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
-
-rerun     = True
-pixel_num = 100j
+dir_name     = "proj_part"
+rerun        = True
+pixel_num    = 100j
 z_source_max = 5
-verbose =True
+verbose      = True
 
+################################################
+# debugging funct.
+def _namestr(obj, namespace):
+    try:
+        return [name for name in namespace if namespace[name] is obj]
+    except:
+        return "name not found"
+
+def _debug(var=None,namespace=globals()):
+    print("DEBUG")
+    if var is not None:
+        name_var = _namestr(var,namespace)
+        if len(name_var)==1:
+            name_var = name_var[0]
+        print(name_var,":",var)
+################################################
+
+if rerun:
+    Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
+    Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
+    mkdir(Gal.proj_dir)
+    Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
+else:
+    # find an already "random" galaxy
+    dens_res_path = glob.glob(gal_dir+"/snap_*/dir_name_*/dens_res.pkl")
+    dens_res = np.random.choice(dens_res_path)
+    class empty_class():
+        def __init__(self):
+            return None
+    Gal = empty_class()
+    Gal.dens_res = dens_res
+    Gal.proj_dir = get_dir_basename(dens_res)[0]
     
 if verbose:
     print("Assumptions: We are considering the maximum source redshift to be ",z_source_max)
-    if int(pixel_num)<500:
+    if int(pixel_num.imag)<500:
         print("Warning: running test")
-    elif int(pixel_num)>=1000:
+    elif int(pixel_num.imag)>=1000:
         print("Warning: running very long")
 
 def get_radius(RAs,DECs):
-    # The following would not necessarily have the same pixelscale in the 2Dim
-    # because RA and DEC might not be on the same range, but we create a grid with the same number of points for both
+    # define a "radius" (more like 1/2 of the edge-lenght) of the grid used to sample the density
+    
+    # We want to have the same pixelscale in the 2Dim
+    # the obvioious way would give RA and DEC that might not be on the same range
+    # but we create a grid with the same number of points for both
     # we rather would go as such: redefine the ranges such that the number of pixels 
-    # and the ranges are the same (but there might be some empty pixels for either of the two dimensions)
+    # and the ranges are the same (but there might be some empty, ie 0 density, pixels
+    # for either of the two dimensions)
     ramin  = RAs.min()
     ramax  = RAs.max()
     #rangeRa = ramax - ramin
@@ -79,20 +108,37 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
         # to do : deal with this
         raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
         #return 0
-    max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2)
-    assert(max_DsDds.unit==u.dimensionless_unscaled)
+    max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
+    print("DEBUG NOTE: the approx MW surf.dens. is 2*1e9Msun/kpc^2")
+    _debug(np.max(dens_Ms_kpc2),namespace=locals())
+    _debug(max_DsDds,namespace=locals())
+    max_DsDds = max_DsDds.to("") # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
     max_DsDds = max_DsDds.value # dimensionless
+    _debug(max_DsDds,namespace=locals())
     #z_source_range = np.linspace(z_lens,z_source_max,100) # it's a very smooth funct->
     min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
-    if not np.any(min_DsDds<max_DsDds):
+    min_DsDds = min_DsDds.to("") # dimensionless
+    min_DsDds = min_DsDds.value
+    
+    z_source_range = np.linspace(z_lens+0.001,z_source_max,100) # it's a very smooth funct->
+    DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
+    if not min_DsDds<max_DsDds:
         # to do: deal with this kind of output
         if verbose:
             print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
+            # debug:
+            # verify the computation
+            print("DEBUG")
+            plt.axhline(max_DsDds,ls="--",c="r",label="dens*4pi*G*Dl/c^2")
+            plt.plot(z_source_range,DsDds,ls="-",c="k",label="Ds/Dds(z_source)")
+            plt.legend()
+            name = "tmp/DsDds.pdf"
+            plt.savefig(name)
+            print("Saved "+name)
         return 0
     else:
-        z_source_range = np.linspace(z_lens,z_source_max,100) # it's a very smooth funct->
-        DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
-        minimise = np.abs(DsDds-max_DsDds) 
+        # note that the successful test means only that there is AT LEAST 1 PIXEL that is supercritical
+        minimise     = np.abs(DsDds-max_DsDds) 
         z_source_min = z_source_range[np.argmin(minimise)]
         # select a random source within the range
         z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
@@ -100,11 +146,36 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
             print("Minimum z_source:",np.round(z_source_min,2))
             print("Chosen z_source:", np.round(z_source,2))
         return z_source
-try:
-    if rerun:
-        raise RuntimeError("Rerunning anyway")
-    dens_Ms_kpc2, RAs,DECs,cosmo = load_whatever(Gal.dens_res)
-except:
+        
+def get_dens_map_rotate(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose):
+    # try all projection in order to obtain a lens
+    proj_index = 0
+    res = None
+    while proj_index<3:
+        try:
+            res = get_dens_map_main(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
+                                    z_source_max=z_source_max,verbose=verbose)
+            break
+        except AttributeError:
+            # should only be if the minimum z_source is higher than the maximum z_source
+            # try with other proj
+            proj_index+=1
+    if res is None:
+        raise RuntimeError("There is no projection of the galaxy that create a lens given the z_source_max")
+    else:
+        return res
+def get_dP(radius_kpc,pixel_num,arcXkpc=None,cosmo=None,Gal=None):
+    if arcXkpc is None:
+        arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
+    try:
+        radius_kpc.value 
+    except AttributeError:
+        # hoping the radius is actually inserted in kpc
+        radius_kpc *= u.kpc 
+    return 2*radius_kpc*arcXkpc.to("arcsec/kpc")/(int(pixel_num.imag)*u.pix) #''/pix
+def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=True,save_res=True,plot=True):
+    # given a projection, produce the density map
+    # fails if it can't produce a supercritical lens w. z_source<z_source_max
     
     Xstar,Ystar,Zstar = Gal.stars["coords"].T # in Mpc/h
     Xgas,Ygas,Zgas    = Gal.gas["coords"].T   # in Mpc/h
@@ -116,6 +187,16 @@ except:
     Mdm   = Gal.dm["mass"] # in Msun 
     Mbh   = Gal.bh["mass"] # in Msun 
     
+    
+    # Concatenate particle properties
+    # the unit is Mpc/h -> has to be converted to Mpc. Meaning that the value has to be divided by h
+    x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc/Gal.h # now in Mpc
+    y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc/Gal.h # now in Mpc
+    z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc/Gal.h # now in Mpc
+    #  print("QUESTION: do we have to convert also the mass by h") -> I think we have to
+    m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun/Gal.h
+
+    """
     # From https://academic.oup.com/mnras/article/470/1/771/3807086
     # I think that 
     # 1) smoothing make sense for hydrodym, maybe less so for lens modelling
@@ -123,139 +204,151 @@ except:
     #    - w/o smoothing (all point particles)
     #    - w. smoothing: - Gaussian
     #                    - isoth-sphere
-    SmoothStar = Gal.stars["smooth"] # in Mpc/h
-    SmoothGas  = Gal.gas["smooth"] # in Mpc/h
-    SmoothDM   = np.zeros_like(Mdm) #Gal.dm["smooth"] # in Mpc/h -> no smoothing for DM
-    SmoothBH   = Gal.bh["smooth"] # in Mpc/h
+    SmoothStar = Gal.stars["smooth"]  # in Mpc/h
+    SmoothGas  = Gal.gas["smooth"]    # in Mpc/h
+    SmoothDM   = np.zeros_like(Mdm)   # in Mpc/h -> no smoothing for DM
+    SmoothBH   = Gal.bh["smooth"]     # in Mpc/h
+    smooth     = np.concatenate([SmoothDM,SmoothStar,SmoothGas,SmoothBH])
+    """
+    # DEBUG
+    max_diam = np.max([np.max(x.value) - np.min(x.value),np.max(y.value) - np.min(y.value),np.max(z.value) - np.min(z.value)])*u.Mpc
+    _debug(max_diam)
     
-    # Concatenate particle properties
-    coords = np.concatenate([Gal.dm["coords"],Gal.stars["coords"],Gal.gas["coords"],Gal.bh["coords"]]) # shape: Nparts,3
-    # the unit is Mpc/h -> has to be converted to Mpc. Meaning that the value has to be divided by h
-    x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc/Gal.h # now in Mpc
-    y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc/Gal.h # now in Mpc
-    z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc/Gal.h # now in Mpc
-    print("QUESTION: do we have to convert also the mass by h")
-    m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun
-    smooth = np.concatenate([SmoothDM,SmoothStar,SmoothGas,SmoothBH])
-    
-    # first test: proj along z
-    X,Y = x,y
     # center around the center of the galaxy
     # correct from cMpc/h to Mpc/h
     # then from Mpc/h to Mpc
-    Cx,Cy,_= Gal.centre*u.Mpc/(Gal.xy_propr2comov*Gal.h) # this should be now in Mpc
-    X -=Cx
-    Y -=Cy
-    """
-    kde = gaussian_kde(np.array([X,Y]),weights=m)
-    xmin = X.min()
-    xmax = X.max()
-    ymin = Y.min()
-    ymax = Y.max()
-    Xg, Yg = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
-    positions = np.vstack([Xg.ravel(), Yg.ravel()])
-    Z = np.reshape(kde(positions).T, Xg.shape)
-    fig, ax = plt.subplots()
-    ax.contour(Xg, Yg, Z)
-    namefig = f"{Gal.proj_dir}/kde_massmap0.pdf"
-    plt.savefig(namefig)
-    print("Saved "+namefig)
-    """
+    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov*Gal.h) # this should be now in Mpc
     
-    """
-    X,Y = x,y
-    kde = gaussian_kde(np.array([X,Y]),weights=m)
-    xmin = X.min()
-    xmax = X.max()
-    ymin = Y.min()
-    ymax = Y.max()
-    Xg, Yg = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
-    positions = np.vstack([Xg.ravel(), Yg.ravel()])
-    Z = np.reshape(kde(positions).T, Xg.shape)
-    fig, ax = plt.subplots()
-    ax.contour(Xg, Yg, Z)
-    namefig = f"{Gal.proj_dir}/kde_massmap.pdf"
-    plt.savefig(namefig)
-    print("Saved "+namefig)
+    # projection along given indexes
+    # xy : ind=0
+    # xz : ind=1
+    # yz : ind=2
+    if proj_index==0:
+        _=True # all as usual
+    elif proj_index==1:
+        y  = copy(z)
+        Cy = copy(Cz)
+    elif proj_index==2:
+        x  = copy(y)
+        Cx = copy(Cy)
+        y  = copy(z)
+        Cz = copy(Cz)
+    x -=Cx
+    y -=Cy
+
     
-    """
-    
-    
+    # Redshift: 
     z_lens = Gal.z
-    # we should probably ignore galaxies too close to us
-    if Gal.z<0.1:
-        print("WARNING: close by galaxy z="+str(Gal.z)+"\nIgnoring it and assuming it is at z=0.5")
-        Gal.z = 0.5
-    print("z_lens",z_lens)
-    #z_source = 1.5*z_lens
-    #print("z_source",z_source)
-    cosmo = FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
-    arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
-    # note: gal coords are in Mpc 
-    RAs  = X*arcXkpc # ''
+    if verbose:
+        print("z_lens",z_lens)
+    cosmo   = FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
+    #arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
+
+    # We don't need to sample it in arcsec, we can keep it in kpc
+    """
+    # note: gal coords are in Mpc -> conv to ''
+    RAs  = x*arcXkpc # ''
     RAs  = RAs.to("arcsec") 
-    DECs = Y*arcXkpc # ''
+    DECs = y*arcXkpc # ''
     DECs = DECs.to("arcsec") 
     
-    
-    print("<RAs>",np.mean(RAs))
-    print("tot mass",np.sum(m))
-    #np.concatenate([Ystar,Ygas,Ydm,Ybh]).to("kpc").value*arcXkpc
+    if verbose:
+        print("<RAs>",np.mean(RAs))
+        print("tot mass",np.sum(m))
     
     # fit the mass distribution w KDE
-    kde    = gaussian_kde(np.array([RAs.value,DECs.value]),weights=m.value)# Msun/pix^2 (but dimensionless)
+    kde       = gaussian_kde(np.array([RAs.value,DECs.value]),weights=m.value)# Msun/pix^2 (but reported dimensionless)
 
-    radius = get_radius(RAs,DECs)
-    dP     = 2*radius/(int(pixel_num)*u.pix) #''/pix
-
+    radius    = get_radius(RAs,DECs)
+    dP        = 2*radius/(int(pixel_num.imag)*u.pix) # ''/pix
     RAg, DECg = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num]
     positions = np.vstack([RAg.ravel(), DECg.ravel()])
     fit_kde   = kde(positions)*u.Msun/(u.pix**2)  # Msun/pix^2 -> the kde give density as function of the pixel number, not the coordinates
+    """
+    if verbose:
+        print("<Xs>",np.mean(x))
+        print("tot mass",np.sum(m))
     
-    print("fit_kde sum",np.sum(fit_kde))
-    #print("DEBUG shape fit_kde,RAg",np.shape(fit_kde),np.shape(RAg))
-    dens    = np.reshape(fit_kde, RAg.shape).T # Msun/pix^2 # needed
-    fig, ax = plt.subplots(2)
-    #print(np.shape(dens),"np.shape(dens)")
-    ax[0].contour(RAg, DECg, dens.value)
-    ax[1].imshow(dens.value, cmap=plt.cm.gist_earth_r)
-    namefig = f"{Gal.proj_dir}/kde_densmap.pdf"
-    plt.savefig(namefig)
-    plt.close()
-    print("Saved "+namefig)
+    # fit the mass distribution w KDE
+    x_kde,y_kde = x.to("kpc").value,y.to("kpc").value
+    kde         = gaussian_kde(np.array([x_kde,y_kde]),weights=m.value)# Msun/kpc^2 (but reported dimensionless)
+
+    radius    = get_radius(x_kde,y_kde) #kpc
+    Xg, Yg    = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num]
+    positions = np.vstack([Xg.ravel(), Yg.ravel()])
+    fit_kde   = kde(positions)*u.Msun/(u.kpc**2)  # Msun/kpc^2 
+    #-> the kde give density as function of the pixel number, not the coordinates
+    if verbose:
+        print("fit_kde sum",np.sum(fit_kde))
+    dens    = np.reshape(fit_kde, Xg.shape).T # Msun/pix^2 
+    if plot:
+        """
+        fig, ax = plt.subplots(2)
+        ax[0].contour(Xg, Xg, dens.value)
+        ax[1].imshow(dens.value, cmap=plt.cm.gist_earth_r)
+        namefig = f"{Gal.proj_dir}/kde_densmap.pdf"
+        plt.savefig(namefig)
+        plt.close()
+        print("Saved "+namefig)
+        """
+        ramin  = x_kde.min()
+        ramax  = x_kde.max()
+        decmin = y_kde.min()
+        decmax = y_kde.max()
+        extent = [ramin,ramax,decmin,decmax]
+        dens   = fit_kde.reshape(RAg.shape).T
+        plt.imshow(dens,extent=extent, cmap=plt.cm.gist_earth_r)
+        plt.scatter(x_kde,y_kde,c="w",marker=".")
+        plt.contour(Xg, Yg, dens.T,extent=extent)
+        plt.xlim([ramin,ramax])
+        plt.ylim([decmin,decmax])
+        namefig = f"{Gal.proj_dir}/kde_densmap.pdf"
+        plt.savefig(namefig)
+        plt.close()
+        print("Saved "+namefig)
+
+
+
 
     # define the z_source:
-    dens_Ms_arcsec2 = dens/(dP**2) # 
-    dens_Ms_kpc2    = dens_Ms_arcsec2*(arcXkpc**2)
-    z_source        = get_z_source(cosmo,z_lens,dens_Ms_kpc2=dens_Ms_kpc2)
+    # dens now is already in Msun/kpc^2
+    """
+    dens_Ms_arcsec2 = dens/(dP**2)  # Msun /''^2 
+    dens_Ms_kpc2    = dens_Ms_arcsec2*(arcXkpc**2) # Msun/kpc^2
+    """   
+    dens_Ms_kpc2    = dens 
+    z_source        = get_z_source(cosmo,z_lens,dens_Ms_kpc2=dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose)
     if z_source==0:
-        raise ValueError("Try rotating the galaxy")
-    # save them
-    #save_json([dens,RAs,DECs],Gal.dens_res)
-    res = [dens_Ms_kpc2,RAs,DECs,cosmo]
-    with open(Gal.dens_res,"wb") as f:
-        pickle.dump(res,f)
-
+        raise AttributeError("Rerun trying different projection")
+        
+    dP        = get_dP(radius*u.kpc,pixel_num) # ''/pix -> to double check that this is correct
+    # store the results
+    res = [dens_Ms_kpc2,radius,dP,cosmo]
+    if save_res:
+        with open(Gal.dens_res,"wb") as f:
+            pickle.dump(res,f)
+        print("Saved "+Gal.dens_res)
+    # still consider the dP -> has to convert from kpc/pix to ''/pix
+    return res
     
-
-# this is defined for the plot previously
-if "RAg" not in locals():
-    radius    = get_radius(RAs,DECs)
-    RAg, DECg = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num]
-    #arcXkpc   = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
-    dP        = 2*radius/(int(pixel_num)*u.pix) #''/pix
+try:
+    if rerun:
+        raise RuntimeError("Rerunning anyway")
+    dens_Ms_kpc2,radius,dP,cosmo = load_whatever(Gal.dens_res)
+    
+    if len(dens_Ms_kpc2)!=int(pixel_num.imag):
+        print("DEBUG")
+        print(len(dens_Ms_kpc2),int(pixel_num.imag))
+        print("Num pixel != of the wanted number of pixel, Rerunning")
+        raise RuntimeError()
+except:
+    dens_Ms_kpc2,radius,dP,cosmo = get_dens_map_rotate(Gal=Gal,pixel_num=pixel_num,
+                                                       z_source_max=z_source_max,verbose=verbose)
+Xg, Yg = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num] # kpc
+arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
 
 # create lensed image:
-from lenstronomy.LensModel import convergence_integrals
-# dPix has to be obtained from the physical size of the object
-# -> no, it's given by the pixel_num 
-"""
-dPra        =  (RAs.max()-RAs.min())/(len(RAs)*u.pix) #np.diff(RAs).mean()/u.pix # ''/pix 
-dPdec       =  (DECs.max()-DECs.min())/(len(DECs)*u.pix) # ''/pix
-print("Pixel scale in 2 dim",dPra,dPdec,dPra/dPdec,)
-print("dP has to be computed correctly from pixel_num")
-"""
-#print("dP.unit",dP.unit)
+# dPix it's given by the pixel_num  
 cosmo_dd  = cosmo.angular_diameter_distance(z_lens).to("kpc")   #kpc
 cosmo_ds  = cosmo.angular_diameter_distance(z_source).to("kpc") #kpc
 cosmo_dds = cosmo.angular_diameter_distance_z1z2(z1=z_lens,z2=z_source).to("kpc") #kpc
@@ -270,21 +363,43 @@ kappa_grid  = dens_Ms_kpc2/Sigma_Crit # 1
 # NOTE: a lens is such only if kappa_map > 1 at least at one point
 # 1st assumption: we will realistically assume that such point is the center of the galaxy -> position the source there
 # check that 
-assert(np.any(kappa_grid>1))
+assert(np.any(kappa_grid>1))#this should be true given our get_z_source function
 # if not: check if there is a realistic (higher)  z_source  to make such that the 
+
 # add masking
 # add padding
 
-num_pot    = convergence_integrals.potential_from_kappa_grid(kappa_grid, dP) # ''^2 / pix^2 -> this is odd but that's just how it is computed
-print("numpot,unit",num_pot.unit)
-numPot_div_dP = num_pot/dP # -> ''/pix 
-raise("The latest unit problem is here: what exactly should it be the correct way to obtain alpha in arcsecs?")
-print("numPot_div_dP,unit",numPot_div_dP.unit)
-num_aRa,num_aDec = np.gradient(numPot_div_dP)/dP # this smh divide(?) by pix? and therefore the unit of the output must be only ''  -> set it by hand
-print("num_aRa,unit",num_aRa.unit)
-#*u.arcsec
+# I don't have to go trough the potential->deflection_from_kappa_grid ->later needed when we'll have to add the LOS effects
+"""
+    #num_pot    = convergence_integrals.potential_from_kappa_grid(kappa_grid, dP) # ''^2 / pix^2 -> this is odd but that's just how it is computed
+    #print("numpot,unit",num_pot.unit)
+    #numPot_div_dP = num_pot/dP # -> ''/pix 
+    #raise("The latest unit problem is here: what exactly should it be the correct way to obtain alpha in arcsecs?")
+    #print("numPot_div_dP,unit",numPot_div_dP.unit)
+    #num_aRa,num_aDec = np.gradient(numPot_div_dP)/dP # this smh divide(?) by pix? and therefore the unit of the output must be only ''  -> set it by hand
+    -> the function doesn't respect the units
+"""
+##
+"""
+Deflection angle :math:`\\vec {\\alpha }}` from a convergence grid :math:`\\kappa`.
 
-def sersic_brightness(x,y,n=4):
+.. math::
+    {\\vec {\\alpha }}({\\vec {\\theta }})={\\frac {1}{\\pi }}
+    \\int d^{2}\\theta ^{\\prime }{\\frac {({\\vec {\\theta }}-{\\vec {\\theta }}^{\\prime })
+    \\kappa ({\\vec {\\theta }}^{\\prime })}{|{\\vec {\\theta }}-{\\vec {\\theta }}^{\\prime }|^{2}}}
+
+The computation is performed as a convolution of the Green's function with the convergence map using FFT.
+
+:param kappa: convergence values for each pixel (2-d array)
+:param grid_spacing: scale of an individual pixel (per axis) of grid
+:return: numerical deflection angles in x- and y- direction over the convergence grid points    
+"""
+num_aRa,num_aDec = convergence_integrals.deflection_from_kappa_grid(kappa_grid,dP.value) # this function does not respect dimensions
+num_aRa  *=u.arcsec
+num_aDec *=u.arcsec
+#print("num_aRa,unit",num_aRa.unit) #*u.arcsec
+
+def sersic_brightness(x,y,n=4,I=10):
     # rotate the galaxy by the angle self.pa
     #x = np.cos(self.pa)*(x-self.ys1)+np.sin(self.pa)*(y2-self.ys2)
     #y = -np.sin(self.pa)*(y1-self.ys1)+np.cos(self.pa)*(y2-self.ys2)
@@ -299,15 +414,15 @@ def sersic_brightness(x,y,n=4):
     # brightness at distance r
     bn = 1.992*n - 0.3271
     re = 5.0
-    brightness = np.exp(-bn*((r/re)**(1.0/n)-1.0))
+    brightness = I*np.exp(-bn*((r/re)**(1.0/n)-1.0))
     return brightness
 
 
 #ra,dec = util.array2image(RAg),util.array2image(DECg)
-print("DEBUG: shape RAg,num_aRa",np.shape(RAg),np.shape(num_aRa))
+print("DEBUG: shape Xg,num_aRa",np.shape(Xg),np.shape(num_aRa))
 
-ra  = RAg.reshape(num_aRa.shape)/u.pix  # not entirely sure this unit is correct, but anyway it's just book-keeping
-dec = DECg.reshape(num_aDec.shape)/u.pix  
+ra  = Xg.reshape(num_aRa.shape)*arcXkpc/u.pix  # not entirely sure this unit is correct, but anyway it's just book-keeping
+dec = Yg.reshape(num_aDec.shape)*arcXkpc/u.pix  
 print("DEBUG")
 plt.imshow(ra.value)
 plt.colorbar()

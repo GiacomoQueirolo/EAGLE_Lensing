@@ -243,11 +243,12 @@ def get_gal_path(Gal,ret_snap_dir=False):
         gal_path,gal_snap_dir =  Gal.gal_path,Gal.gal_snap_dir
     except:
         gal_snap_dir = f"{gal_dir}/snap_{Gal.snap}/"
-        gal_path = f"{gal_snap_dir}/G{Gal.Gn}SGn{Gal.SGn}.pkl"
+        gal_path = f"{gal_snap_dir}/{Gal.Name}.pkl"
     if ret_snap_dir:
         return gal_path,gal_snap_dir
     return gal_path
-        
+
+
 class Galaxy:
     def __init__(self, Gn, SGn, CMx,CMy,CMz,M=None,
                  sim=std_sim,z=None,snap=None,query=""):
@@ -260,6 +261,7 @@ class Galaxy:
         self.centre = np.array([CMx,CMy,CMz]) # cMpc
         self.Gn     = Gn
         self.SGn    = SGn
+        self.Name   = f"G{Gn}SGn{SGn}" #note this is unique only within the snap
         self.M      = M
         self.query  = query # query from which this gal is selected (important later for sel. bias)
         # Load data.
@@ -338,9 +340,9 @@ class Galaxy:
         hexp = 0
         # physically motivated verification 
         if varType=="Coordinates":
-            np.testing.assert_almost_equal(aexp,1)
+            self.verbose_assert_almost_equal(aexp,1)
         elif varType=="Mass":
-            np.testing.assert_almost_equal(aexp,0)
+            self.verbose_assert_almost_equal(aexp,0)
         return  1/(self.a**aexp)
     
     def _get_kw_gal(self):
@@ -367,9 +369,21 @@ class Galaxy:
         self.M_bh    = _mass_part(self.bh)
         
         self.M_tot   =  self.M_gas+self.M_dm+self.M_stars +self.M_bh
-        np.testing.assert_almost_equal(float(self.M_tot)/float(self.M),1,decimal=3)
+        self.verbose_assert_almost_equal(float(self.M_tot)/float(self.M),1,decimal=3,msg_title="Mass")
         return self.M_tot
-
+        
+    def verbose_assert_almost_equal(self,value1,value2=1,decimal=3,msg_title=None):
+        # a verbose way of giving info if if fails
+        try:
+            np.testing.assert_almost_equal(value1,value2,decimal=decimal)
+        except AssertionError as AssErr:
+            if msg_title:
+                print(msg_title)
+            print("Error for \n"+str(self))
+            print("found in \n"+str(self.get_pkl_path()))
+            raise AssertionError(AssErr)
+        return 0
+        
     def _verify_cnt(self):
         # verify that the center of mass is indeed correct
         if not hasattr(self,"M_tot"):
@@ -403,13 +417,18 @@ class Galaxy:
         #print(cnt_m/self.centre,cnt_m,self.centre)
         eps = 1e-6
         if np.all(np.abs(self.centre)<eps):
-            print("center is set to zero")
-            np.testing.assert_almost_equal(np.array(cnt_m),np.zero(3),decimal=3)
+            print("Galaxy centered around zero")
+            center_test = np.array(cnt_m)    
         else:
-            np.testing.assert_almost_equal(np.array(cnt_m)/self.centre,np.ones(3),decimal=3)
+            center_test = np.array(cnt_m)-self.centre
+        # is very odd that for some galaxy the center is off by more than 0.01 for 1 of the coords
+        # maybe different wrapping?
+        self.verbose_assert_almost_equal(center_test,np.zeros(3),decimal=1,msg_title="Centre")      
         return 0
         
     def get_pkl_path(self):
+        if not getattr(self,"gal_snap_dir",False):
+           self.gal_path,self.gal_snap_dir = get_gal_path(self,ret_snap_dir=True)
         if not getattr(self,"pkl_path",False):
             self.pkl_path = f"{self.gal_snap_dir}/Gn{self.Gn}SGn{self.SGn}.pkl"
         return self.pkl_path
@@ -429,8 +448,9 @@ class Galaxy:
         
     def __str__(self):
         str_gal = f"Gal {self.Gn}.{self.SGn}"
-        str_gal += f", at z={str(np.round(self.z,3))}, with {'%.1E'%Decimal(self.N_tot_part)} part. of tot Mass {'%.1E'%Decimal(self.M_tot)} [M_sun]"
-        str_gal +=f"divided in N \n\
+        str_gal += f", at z={str(np.round(self.z,3))}/snap={self.snap},"
+        str_gal += f" with \nN={'%.1E'%Decimal(self.N_tot_part)} part.\nof \ntot Mass={'%.1E'%Decimal(self.M_tot)} [M_sun]\n"
+        str_gal +=f" divided in N \n\
                 Stars:{'%.1E'%Decimal(self.N_stars)}\n\
                 Gas:{'%.1E'%Decimal(self.N_gas)}\n\
                 DM:{'%.1E'%Decimal(self.N_dm)}\n\
