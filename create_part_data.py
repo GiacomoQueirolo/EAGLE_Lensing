@@ -15,8 +15,6 @@ from astropy.cosmology import FlatLambdaCDM
 from fnct import std_sim
 from get_gal_indexes import get_rnd_gal
 
-import csv
-
 filename = "particles_EAGLE.csv"
 path     = "./EAGLE_prt_data/"
 
@@ -26,10 +24,10 @@ Xstar,Ystar,Zstar = Gal.stars["coords"].T # in Mpc/h
 Xgas,Ygas,Zgas    = Gal.gas["coords"].T # in Mpc/h
 Xdm,Ydm,Zdm       = Gal.dm["coords"].T # in Mpc/h
 Xbh,Ybh,Zbh       = Gal.bh["coords"].T # in Mpc/h
-Mstar = Gal.stars["mass"] #should already be in Msun 
-Mgas  = Gal.gas["mass"] #should already be in Msun 
-Mdm   = Gal.dm["mass"] #should already be in Msun 
-Mbh   = Gal.bh["mass"] #should already be in Msun 
+Mstar = Gal.stars["mass"] #should already be in Msun/h
+Mgas  = Gal.gas["mass"] #should already be in Msun/h
+Mdm   = Gal.dm["mass"] #should already be in Msun/h 
+Mbh   = Gal.bh["mass"] #should already be in Msun/h
 """
 # -> doesn't work bc DM part are not smoothed
 SmoothStar = Gal.stars["smooth"] # in Mpc/h
@@ -39,10 +37,10 @@ SmoothBH   = Gal.bh["smooth"] # in Mpc/h
 """
 
 # Concatenate particle properties
-x = np.concatenate([Xdm, Xstar, Xgas, Xbh])
-y = np.concatenate([Ydm, Ystar, Ygas, Ybh])
-z = np.concatenate([Zdm, Zstar, Zgas, Zbh])
-m = np.concatenate([Mdm, Mstar, Mgas, Mbh])
+x = np.concatenate([Xdm, Xstar, Xgas, Xbh])/Gal.h #in Mpc
+y = np.concatenate([Ydm, Ystar, Ygas, Ybh])/Gal.h #in Mpc
+z = np.concatenate([Zdm, Zstar, Zgas, Zbh])/Gal.h #in Mpc
+m = np.concatenate([Mdm, Mstar, Mgas, Mbh])/Gal.h #in Msun
 #s = np.concatenate([SmoothDM, SmoothStar, SmoothGas, SmoothBH])
 """
 # Particle type index: 1=dm, 2=stars, 3=gas, 4=bh

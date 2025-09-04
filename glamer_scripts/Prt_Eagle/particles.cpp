@@ -29,7 +29,7 @@ int main(int arg,char **argv){
   int Nsmooth = 16;         // number of neighbors for smoothing scale
   double range = 30.0 * arcsecTOradians; // range of grids in radians
   int Nx_gridmap = 512 ; //x-size of gridmap -> define the resolution w range
-  std::string particle_file = "data/particles_EAGLE.csv" ; // csv4 -> x,y,z,M # could be csv6 w smoothin and particle type but DM has no smoothing scale
+  std::string particle_file = "data/particles_EAGLE_short.csv" ; // csv4 -> x,y,z,M # could be csv6 w smoothin and particle type but DM has no smoothing scale
   //LensHaloParticles phalo("particles.dm.txt",zl,Nsmooth,cosmo,rotation_vector, true, true);
   
   long seed = -28976391; //no idea why we need this one
@@ -73,9 +73,11 @@ int main(int arg,char **argv){
     MakeParticleLenses halomaker(particle_file,
                                   SimFileFormat::csv4,
                                   Nsmooth,true); 
+    
     // the last true is bool recenter -> recenter so that the LensHalos are centered on the center of mass -> to consider -> should just be arbitrary, st center = 0 ?
     Point_3d <double> c_mass = halomaker.getCenterOfMass();
 
+      
     //Point_2d center; // doesn't matter if it's 2D or 3D -> only use x
     
     center[0] = c_mass[0];
@@ -84,13 +86,18 @@ int main(int arg,char **argv){
     // the last entry is inv_area, indicated by "// inverse area for mass compensation"
     // where "bool compensate=false"-> if true a negative mass will be included so that  the region wil have zero mass
     // in my case I think it's safe to set it to 0
+
     halomaker.CreateHalos(cosmo,zl,0);
+    // DEBUG: arrives here no problems
+    std::cout << halomaker.halos.size() ; 
     //  There is a separate halo for each type of particle
     for(auto h : halomaker.halos){
        //lens.insertMainHalo(*h,zl, true);
-        lens.moveinMainHalo(*h,zl, true);
+       std::cout<< h ; 
+       std::cout<< "\n";
+       //std::cout<< h.Npoints;
+       lens.moveinMainHalo(*h,zl, true);
     }
-    // DEBUG: arrives here no problems
       
   }
   
