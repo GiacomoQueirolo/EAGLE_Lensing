@@ -24,12 +24,13 @@ int main(int arg,char **argv){
   
   COSMOLOGY cosmo(CosmoParamSet::Planck1yr);
   Point_2d rotation_vector(0,0);
+  
   PosType zl=0.4;           // redshift of lens
   PosType z_source = 2.0;   // redshift of source
   int Nsmooth = 16;         // number of neighbors for smoothing scale
   double range = 30.0 * arcsecTOradians; // range of grids in radians
   int Nx_gridmap = 512 ; //x-size of gridmap -> define the resolution w range
-  std::string particle_file = "data/particles_EAGLE_short.csv" ; // csv4 -> x,y,z,M # could be csv6 w smoothin and particle type but DM has no smoothing scale
+  std::string particle_file = "data/particles_EAGLE.csv";
   //LensHaloParticles phalo("particles.dm.txt",zl,Nsmooth,cosmo,rotation_vector, true, true);
   
   long seed = -28976391; //no idea why we need this one
@@ -119,11 +120,11 @@ int main(int arg,char **argv){
   lens.ResetSourcePlane(z_source,false);
   
   // output some maps
-  //gridmap.writeFits<float>(LensingVariable::KAPPA,"!particles_kappa.fits");
+  gridmap.writeFits<float>(LensingVariable::KAPPA,"!results/particles_kappa.fits");
   //gridmap.writeFits<float>(LensingVariable::INVMAG,"!particles_invmag.fits");
   gridmap.writeFits<float>(LensingVariable::ALPHA1,"!results/particles_ALPHA1.fits");
   gridmap.writeFits<float>(LensingVariable::ALPHA2,"!results/particles_ALPHA2.fits");
-  //gridmap.writeFits<float>(LensingVariable::ALPHA,"!results/particles_ALPHA.fits");
+  gridmap.writeFits<float>(LensingVariable::ALPHA,"!results/particles_ALPHA.fits");
 
   // the following is kept for now to check if it works -> note: for the test it doesn't
 

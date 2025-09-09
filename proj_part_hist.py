@@ -1,10 +1,6 @@
-# project mass to a 2D 
-
-# smotthing: read appending A of 
-    # https://academic.oup.com/mnras/article/470/1/771/3807086
-
-# to do: rewrite code in order to have a funct. to create mass distribution along all axes
-# then complicate it by saving stuff
+# further simplification by taking 2D histogram
+# instead of KDE
+# using chatgpt to get it faster 
 
 import os
 import csv
@@ -35,110 +31,16 @@ verbose = True
 pixel_num = 100j
 ################################################
 # debugging funct.
-"""
-def _namestr(obj, namespace):
-    try:
-        return [name for name in namespace if namespace[name] is obj]
-    except:
-        return "name not found"
 
-def _debug(var=None,namespace=globals()):
-    print("DEBUG")
-    if var is not None:
-        name_var = _namestr(var,namespace)
-        if len(name_var)==1:
-            name_var = name_var[0]
-        print(name_var,":",var)
-"""
-################################################
+from proj_part import get_radius,get_z_source,get_dP
 
-def basic_get_radius(RAs,DECs):
-    # define a "radius" (more like 1/2 of the edge-lenght) of the grid used to sample the density
-    
-    # We want to have the same pixelscale in the 2Dim
-    # the obvioious way would give RA and DEC that might not be on the same range
-    # but we create a grid with the same number of points for both
-    # we rather would go as such: redefine the ranges such that the number of pixels 
-    # and the ranges are the same (but there might be some empty, ie 0 density, pixels
-    # for either of the two dimensions)
-    ramin  = RAs.min()
-    ramax  = RAs.max()
-    #rangeRa = ramax - ramin
-    decmin = DECs.min()
-    decmax = DECs.max()
-    #rangeDec = decmax-decmin
-    # we have the advantage that the center is set to 0 ->
-    radius =  max([0-ramin,ramax-0,0-decmin,decmax-0])
-    # verify:
-    assert(ramin>=-radius)
-    assert(decmin>=-radius)
-    assert(ramax<=radius)
-    assert(decmax<=radius)
-    return radius
-
-def get_radius(RAs,DECs):
-    # if there are single particles on the outlier it would consider 
-    # a lot of empty space
-    rad_max = basic_get_radius(RAs,DECs)
-    # we take 6 <sigmas> of 
-    rad_min = 6*(np.std(RAs)+np.std(DECs))/2
-    return np.min([rad_max,rad_min])
-    
-def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose):
-    # the lens has to be supercritical
-    # dens>Sigma_crit = (c^2/4PiG D_d(z_lens) ) D_s(z_source)/D_ds(z_lens,z_source)
-    # -> D_s(z_source)/D_ds(z_lens,z_source) < 4PiG D_d(z_lens) *dens/c^2
-    # D_s(z_source)/D_ds(z_lens,z_source) is not easy to compute analytically, but we can sample it
-    if z_lens>z_source_max:
-        # to do : deal with this
-        raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
-        #return 0
-    max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
-    print("DEBUG NOTE: the approx MW surf.dens. is 2*1e9Msun/kpc^2")
-    print("DEBUG\n","np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2))
-    print("DEBUG\n","max_DsDds",max_DsDds)
-    max_DsDds = max_DsDds.to("") # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
-    max_DsDds = max_DsDds.value # dimensionless
-    print("DEBUG\n","max_DsDds",max_DsDds)
-    #z_source_range = np.linspace(z_lens,z_source_max,100) # it's a very smooth funct->
-    min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
-    min_DsDds = min_DsDds.to("") # dimensionless
-    min_DsDds = min_DsDds.value
-    
-    z_source_range = np.linspace(z_lens+0.001,z_source_max,100) # it's a very smooth funct->
-    DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
-    if not min_DsDds<max_DsDds:
-        # to do: deal with this kind of output
-        if verbose:
-            print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
-            # debug:
-            # verify the computation
-            print("DEBUG")
-            plt.axhline(max_DsDds,ls="--",c="r",label="dens*4pi*G*Dl/c^2")
-            plt.plot(z_source_range,DsDds,ls="-",c="k",label="Ds/Dds(z_source)")
-            plt.legend()
-            name = "tmp/DsDds.pdf"
-            plt.savefig(name)
-            print("Saved "+name)
-        return 0
-    else:
-        # note that the successful test means only that there is AT LEAST 1 PIXEL that is supercritical
-        minimise     = np.abs(DsDds-max_DsDds) 
-        z_source_min = z_source_range[np.argmin(minimise)]
-        # select a random source within the range
-        z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
-        if verbose:
-            print("Minimum z_source:",np.round(z_source_min,2))
-            print("Chosen z_source:", np.round(z_source,2))
-        return z_source
-        
-def get_dens_map_rotate(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose):
+def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose):
     # try all projection in order to obtain a lens
     proj_index = 0
     res = None
     while proj_index<3:
         try:
-            res = get_dens_map_main(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
+            res = get_dens_map_hist(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
                                     z_source_max=z_source_max,verbose=verbose)
             break
         except AttributeError:
@@ -150,17 +52,7 @@ def get_dens_map_rotate(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbos
     else:
         return res
         
-def get_dP(radius_kpc,pixel_num,arcXkpc=None,cosmo=None,Gal=None):
-    if arcXkpc is None:
-        arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
-    try:
-        radius_kpc.value 
-    except AttributeError:
-        # hoping the radius is actually inserted in kpc
-        radius_kpc *= u.kpc 
-    return 2*radius_kpc*arcXkpc.to("arcsec/kpc")/(int(pixel_num.imag)*u.pix) #''/pix
-    
-def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,save_res=True,plot=True):
+def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,save_res=True,plot=True):
     # given a projection, produce the density map
     # fails if it can't produce a supercritical lens w. z_source<z_source_max
     
@@ -199,7 +91,7 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     """
     # DEBUG
     max_diam = np.max([np.max(x.value) - np.min(x.value),np.max(y.value) - np.min(y.value),np.max(z.value) - np.min(z.value)])*u.Mpc
-    print("DEBUG\n","max_diam",max_diam)
+    print("DEBUG","max_diam",max_diam)
     
     # center around the center of the galaxy
     # correct from cMpc/h to Mpc/h
@@ -223,76 +115,60 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     x -=Cx
     y -=Cy
 
-    
+
+    x = np.asarray(x)
+    y = np.asarray(y)
+    m = np.asarray(m, dtype=float)
+
+
+
     # Redshift: 
     z_lens = Gal.z
     if verbose:
         print("z_lens",z_lens)
     cosmo   = FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
-    #arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
-
-    # We don't need to sample it in arcsec, we can keep it in kpc
-    """
-    # note: gal coords are in Mpc -> conv to ''
-    RAs  = x*arcXkpc # ''
-    RAs  = RAs.to("arcsec") 
-    DECs = y*arcXkpc # ''
-    DECs = DECs.to("arcsec") 
-    
-    if verbose:
-        print("<RAs>",np.mean(RAs))
-        print("tot mass",np.sum(m))
-    
-    # fit the mass distribution w KDE
-    kde       = gaussian_kde(np.array([RAs.value,DECs.value]),weights=m.value)# Msun/pix^2 (but reported dimensionless)
-
-    radius    = get_radius(RAs,DECs)
-    dP        = 2*radius/(int(pixel_num.imag)*u.pix) # ''/pix
-    RAg, DECg = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num]
-    positions = np.vstack([RAg.ravel(), DECg.ravel()])
-    fit_kde   = kde(positions)*u.Msun/(u.pix**2)  # Msun/pix^2 -> the kde give density as function of the pixel number, not the coordinates
-    """
     if verbose:
         print("<Xs>",np.mean(x))
         print("tot mass",np.sum(m))
     
-    # fit the mass distribution w KDE
-    x_kde,y_kde = x.to("kpc").value,y.to("kpc").value
-    kde         = gaussian_kde(np.array([x_kde,y_kde]),weights=m.value)# Msun/kpc^2 (but reported dimensionless)
-
+    x,y = x.to("kpc").value,y.to("kpc").value
     radius    = get_radius(x_kde,y_kde) #kpc
-    Xg, Yg    = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num]
-    positions = np.vstack([Xg.ravel(), Yg.ravel()])
-    fit_kde   = kde(positions)*u.Msun/(u.kpc**2)  # Msun/kpc^2 
-    #-> the kde give density as function of the pixel number, not the coordinates
-    if verbose:
-        print("fit_kde sum",np.sum(fit_kde))
-        print("fit_kde median",np.median(fit_kde))
-        print("fit_kde max",np.max(fit_kde))
-    dens    = np.reshape(fit_kde, Xg.shape).T # Msun/pix^2 
+    xmin = x-radius
+    ymin = y-radius
+    xmax = x+radius
+    ymax = y+radius
+    
+    # numpy.histogram2d returns H with shape (nx_bins, ny_bins) where H[i,j]
+    # counts x-bin i and y-bin j. We transpose to (ny, nx) so rows are y.
+    nx,ny = pixel_num,pixel_num
+    H, xedges, yedges = np.histogram2d(x, y, bins=[nx, ny],
+                                       range=[[xmin, xmax], [ymin, ymax]],
+                                       weights=m)
+    # H shape: (nx, ny) -> transpose to (ny, nx)
+    mass_grid = H.T.copy()
+
+    dx = (xmax - xmin) / nx
+    dy = (ymax - ymin) / ny
+    density = mass_grid / (dx * dy)
+
+    extent = [xmin,xmax,ymin,ymax]
+    plt.imshow(density,extent=extent, cmap=plt.cm.gist_earth_r)
+    plt.scatter(x,y,c="w",marker=".")
+    plt.xlim([xmin,xmax])
+    plt.ylim([ymin,ymax])
+    namefig = f"{Gal.proj_dir}/hist_densmap_proj"+proj_index+".pdf"
+    plt.savefig(namefig)
+    plt.close()
+    print("Saved "+namefig)
+
     if plot:
-        """
-        fig, ax = plt.subplots(2)
-        ax[0].contour(Xg, Xg, dens.value)
-        ax[1].imshow(dens.value, cmap=plt.cm.gist_earth_r)
-        namefig = f"{Gal.proj_dir}/kde_densmap.pdf"
-        plt.savefig(namefig)
-        plt.close()
-        print("Saved "+namefig)
-        """
         try:
-            ramin  = x_kde.min()
-            ramax  = x_kde.max()
-            decmin = y_kde.min()
-            decmax = y_kde.max()
-            extent = [ramin,ramax,decmin,decmax]
-            dens   = fit_kde.reshape(Xg.shape).T
-            plt.imshow(dens.value,extent=extent, cmap=plt.cm.gist_earth_r)
-            plt.scatter(x_kde,y_kde,c="w",marker=".")
-            plt.contour(Xg, Yg, dens.T.value,extent=extent)
-            plt.xlim([ramin,ramax])
-            plt.ylim([decmin,decmax])
-            namefig = f"{Gal.proj_dir}/kde_densmap.pdf"
+            extent = [xmin,xmax,ymin,ymax]
+            plt.imshow(density,extent=extent, cmap=plt.cm.gist_earth_r)
+            plt.scatter(x,y,c="w",marker=".")
+            plt.xlim([xmin,xmax])
+            plt.ylim([ymin,ymax])
+            namefig = f"{Gal.proj_dir}/hist_densmap_proj"+proj_index+".pdf"
             plt.savefig(namefig)
             plt.close()
             print("Saved "+namefig)
@@ -300,10 +176,6 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
             print("while plotting, encountered the following error:")
             print(e)
             print("Ignored and continued w/o plotting")
-
-
-
-
     # define the z_source:
     # dens now is already in Msun/kpc^2
     """
@@ -327,8 +199,8 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
 
 
 if __name__=="__main__":
-    parser = ArgumentParser(description="Project particles into a mass sheet")
-    parser.add_argument("-dn","--dir_name",dest="dir_name",type=str, help="Directory name",default="proj_part")
+    parser = ArgumentParser(description="Project particles into a mass sheet - histogram version")
+    parser.add_argument("-dn","--dir_name",dest="dir_name",type=str, help="Directory name",default="proj_part_hist")
     parser.add_argument("-pxn","--pixel_num",dest="pixel_num",type=int, help="Pixel number",default=pixel_num.imag)
     parser.add_argument("-zsm","--z_source_max",dest="z_source_max",type=float, help="Maximum source redshift",default=z_source_max)
     parser.add_argument("-nrr", "--not_rerun", dest="rerun", 
@@ -378,7 +250,7 @@ if __name__=="__main__":
             print("Num pixel != of the wanted number of pixel, Rerunning")
             raise RuntimeError()
     except:
-        dens_Ms_kpc2,radius,dP,cosmo = get_dens_map_rotate(Gal=Gal,pixel_num=pixel_num,
+        dens_Ms_kpc2,radius,dP,cosmo = get_dens_map_rotate_hist(Gal=Gal,pixel_num=pixel_num,
                                                            z_source_max=z_source_max,verbose=verbose)
     Xg, Yg  = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num] # kpc
     arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
