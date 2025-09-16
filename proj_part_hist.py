@@ -120,7 +120,18 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     y = np.asarray(y)
     m = np.asarray(m, dtype=float)
 
-
+    print("DEBUG")
+    fig, ax = plt.subplots(3)
+    ax[0].hist(x)
+    ax[0].set_title("X")
+    ax[0].hist(y)
+    ax[1].set_title("Y")
+    ax[0].hist(M)
+    ax[2].set_title("M")
+    namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
+    plt.savefig(namefig)
+    plt.close()
+    print("Saved "+namefig)
 
     # Redshift: 
     z_lens = Gal.z
@@ -151,31 +162,16 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     dy = (ymax - ymin) / ny
     density = mass_grid / (dx * dy)
 
-    extent = [xmin,xmax,ymin,ymax]
-    plt.imshow(density,extent=extent, cmap=plt.cm.gist_earth_r)
-    plt.scatter(x,y,c="w",marker=".")
-    plt.xlim([xmin,xmax])
-    plt.ylim([ymin,ymax])
-    namefig = f"{Gal.proj_dir}/hist_densmap_proj"+proj_index+".pdf"
-    plt.savefig(namefig)
-    plt.close()
-    print("Saved "+namefig)
-
     if plot:
-        try:
-            extent = [xmin,xmax,ymin,ymax]
-            plt.imshow(density,extent=extent, cmap=plt.cm.gist_earth_r)
-            plt.scatter(x,y,c="w",marker=".")
-            plt.xlim([xmin,xmax])
-            plt.ylim([ymin,ymax])
-            namefig = f"{Gal.proj_dir}/hist_densmap_proj"+proj_index+".pdf"
-            plt.savefig(namefig)
-            plt.close()
-            print("Saved "+namefig)
-        except TypeError as e:
-            print("while plotting, encountered the following error:")
-            print(e)
-            print("Ignored and continued w/o plotting")
+        extent = [xmin,xmax,ymin,ymax]
+        plt.imshow(density,extent=extent, cmap=plt.cm.gist_earth_r)
+        plt.scatter(x,y,c="w",marker=".")
+        plt.xlim([xmin,xmax])
+        plt.ylim([ymin,ymax])
+        namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"
+        plt.savefig(namefig)
+        plt.close()
+        print("Saved "+namefig)
     # define the z_source:
     # dens now is already in Msun/kpc^2
     """
