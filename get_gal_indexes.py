@@ -13,9 +13,10 @@ import os,copy
 
 from python_tools.get_res import load_whatever
 from sql_connect import exec_query
-from fnct import Galaxy,gal_dir,get_z,std_sim
+from fnct import Galaxy,gal_dir,get_z,std_sim,gal_dir
 
-def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl_name="massive_gals.pkl",plot=True,check_prev=False):
+def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl_name="massive_gals.pkl",plot=True,check_prev=True):
+    pkl_path = f"{gal_dir}/{pkl_name}" 
      # select higher masses bc 1) lenses 2) else we have too many points
     myQuery = "SELECT \
         gal.GroupNumber as Gn, \
@@ -33,14 +34,16 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl
     ORDER BY \
         gal.Redshift"%(sim,min_z,max_z,min_mass)
     
+    # NOTE: center of mass is in comoving coord.(cMpc)
     # Execute
     if check_prev:
         try:
-            myData = load_whatever(pkl_name)
-            if myData["query"] != myQuery:
+            myData = load_whatever(pkl_path)
+            #formatting might be slightly diff.
+            if myData["query"].replace(" ","") != myQuery.replace(" ",""):
                 raise UserWarning("Loaded previous results doesn't have the same query - rerunning and overwriting")
         except:
-            print("Tried and failed to load previous results :"+pkl_name+"\nRerunning SQL query")
+            print("Tried and failed to load previous results :"+pkl_path+"\nRerunning SQL query")
             check_prev = False
     if not check_prev:
         myData = exec_query(myQuery)
@@ -65,13 +68,14 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl
         plt.xlabel(r'z')
         plt.ylabel(str_logMass)
         plt.savefig("gal_mvsz.png")
-    if save_pkl:
-        with open(pkl_name,"wb") as f:
+    if save_pkl and not check_prev:
+        with open(pkl_path,"wb") as f:
             pickle.dump(myData,f)
+        print("Saving "+pkl_path)
     return myData
 
 
-def get_rnd_gal(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",pkl_name="massive_gals.pkl",check_prev=False,save_pkl=False,reuse_previous=True):
+def get_rnd_gal(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True,reuse_previous=True):
     if reuse_previous:
         # note: this way we will always use the same
         # TODO: randomly select within the acceptable ones

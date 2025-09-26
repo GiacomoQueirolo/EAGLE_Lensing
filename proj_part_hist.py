@@ -19,7 +19,7 @@ from lenstronomy.LensModel import convergence_integrals
 
 #from lenstronomy.Util import util
 
-from fnct import gal_dir,std_sim
+from fnct import gal_dir,std_sim,test_sim
 from get_gal_indexes import get_rnd_gal
 
 from python_tools.tools import mkdir,get_dir_basename
@@ -27,8 +27,8 @@ from python_tools.get_res import load_whatever
 
 
 z_source_max = 5
-verbose = True
-pixel_num = 100j
+verbose      = True
+pixel_num    = 100j
 ################################################
 # debugging funct.
 
@@ -38,12 +38,18 @@ def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,v
     # try all projection in order to obtain a lens
     proj_index = 0
     res = None
+    res = get_dens_map_hist(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
+                                    z_source_max=z_source_max,verbose=verbose)
+    raise RuntimeError("DEBUG--Arrived here")
+    """
     while proj_index<3:
         try:
             res = get_dens_map_hist(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
                                     z_source_max=z_source_max,verbose=verbose)
             break
-        except AttributeError:
+        except AttributeError as Ae:
+            print("Error : ")
+            print(Ae)
             # should only be if the minimum z_source is higher than the maximum z_source
             # try with other proj
             proj_index+=1
@@ -51,8 +57,11 @@ def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,v
         raise RuntimeError("There is no projection of the galaxy that create a lens given the z_source_max")
     else:
         return res
+    """
         
 def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,save_res=True,plot=True):
+    nx,ny = int(pixel_num.imag),int(pixel_num.imag)
+
     # given a projection, produce the density map
     # fails if it can't produce a supercritical lens w. z_source<z_source_max
     
@@ -66,14 +75,49 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     Mdm   = Gal.dm["mass"] # in Msun 
     Mbh   = Gal.bh["mass"] # in Msun 
     
+    # center around the center of the galaxy
+    # correct from cMpc/h to Mpc/h
+    # then from Mpc/h to Mpc
+    # center of mass is given in Comiving coord 
+    # see https://arxiv.org/pdf/1510.01320 D.23 -> given that it is not corrected, it should prob
+    # also be corrected for h -> or maybe not?
+    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov*Gal.h) # this should be now in Mpc
+    
+
+    print("DEBUG")
+    fig, ax = plt.subplots(3)
+    for XX,YY,MM,name in zip([Xstar,Xgas,Xdm,Xbh],[Ystar,Ygas,Ydm,Ybh],[Mstar,Mgas,Mdm,Mbh],["star","gas","dm","bh"]):
+        x,y = XX*u.Mpc-Cx,YY*u.Mpc-Cy
+        """radius = get_radius(x,y)
+        xmin = -radius
+        ymin = -radius
+        xmax = +radius
+        ymax = +radius
+        """
+        ax[0].hist(x,bins=nx,ls='dashed', lw=3,facecolor="None",label=name)#,range=[xmin, xmax])
+        ax[0].set_xlabel("X [kpc]")
+        #ax[0].set_xlim([xmin,xmax])
+        ax[1].hist(y,bins=ny,ls='dashed', lw=3,facecolor="None",label=name)#,range=[ymin, ymax])
+        ax[1].set_xlabel("Y [kpc]")
+        #ax[1].set_xlim([ymin,ymax])
+        ax[2].hist(MM/1e8,bins=nx,ls='dashed', lw=3,facecolor="None",label=name)
+        ax[2].set_xlabel("M [1e8 SolMass]")
+        ax[2].legend()
+    namefig = f"{Gal.proj_dir}/hist1D_{proj_index}_part.png"
+    plt.tight_layout()
+    plt.savefig(namefig)
+    plt.close()
+    print("Saved "+namefig)
+
     
     # Concatenate particle properties
-    # the unit is Mpc/h -> has to be converted to Mpc. Meaning that the value has to be divided by h
-    x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc/Gal.h # now in Mpc
-    y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc/Gal.h # now in Mpc
-    z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc/Gal.h # now in Mpc
-    #  print("QUESTION: do we have to convert also the mass by h") -> I think we have to
-    m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun/Gal.h
+    # the unit is Mpc/h -> has to be converted to Mpc. Meaning that the value has to be divided by h 
+    # Wrong, they are already given corrected for h
+    x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc#/Gal.h # now in Mpc
+    y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc#/Gal.h # now in Mpc
+    z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc#/Gal.h # now in Mpc
+    #  print("QUESTION: do we have to convert also the mass by h") -> I think we have to 
+    m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun #/Gal.h
 
     """
     # From https://academic.oup.com/mnras/article/470/1/771/3807086
@@ -93,11 +137,6 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     max_diam = np.max([np.max(x.value) - np.min(x.value),np.max(y.value) - np.min(y.value),np.max(z.value) - np.min(z.value)])*u.Mpc
     print("DEBUG","max_diam",max_diam)
     
-    # center around the center of the galaxy
-    # correct from cMpc/h to Mpc/h
-    # then from Mpc/h to Mpc
-    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov*Gal.h) # this should be now in Mpc
-    
     # projection along given indexes
     # xy : ind=0
     # xz : ind=1
@@ -111,61 +150,80 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
         x  = copy(y)
         Cx = copy(Cy)
         y  = copy(z)
-        Cz = copy(Cz)
+        Cy = copy(Cz)
     x -=Cx
     y -=Cy
 
-
+    """
     x = np.asarray(x)
     y = np.asarray(y)
     m = np.asarray(m, dtype=float)
-
-    print("DEBUG")
-    fig, ax = plt.subplots(3)
-    ax[0].hist(x)
-    ax[0].set_title("X")
-    ax[0].hist(y)
-    ax[1].set_title("Y")
-    ax[0].hist(M)
-    ax[2].set_title("M")
-    namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
-    plt.savefig(namefig)
-    plt.close()
-    print("Saved "+namefig)
-
+    """
+    x      = np.asarray(x.to("kpc").value) #kpc
+    y      = np.asarray(y.to("kpc").value) #kpc
+    radius = get_radius(x,y)               #kpc
+    m      = np.asarray(m.to("solMass").value, dtype=float)  # M_sol
     # Redshift: 
     z_lens = Gal.z
     if verbose:
         print("z_lens",z_lens)
     cosmo   = FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
+    print("DEBUG")
+    print(cosmo)
+    print("H0",Gal.h*100, "Om0",1-Gal.h)
+    
     if verbose:
         print("<Xs>",np.mean(x))
         print("tot mass",np.sum(m))
     
-    x,y = x.to("kpc").value,y.to("kpc").value
-    radius    = get_radius(x_kde,y_kde) #kpc
+    # I think the following is wrong: it should be centered around 0 bc X,Y already recentered
+    """
     xmin = x-radius
     ymin = y-radius
     xmax = x+radius
     ymax = y+radius
+    """
+    xmin = -radius
+    ymin = -radius
+    xmax = +radius
+    ymax = +radius
+
     
+    print("DEBUG")
+    fig, ax = plt.subplots(3)
+    ax[0].hist(x,bins=nx,range=[xmin, xmax])
+    ax[0].set_xlabel("X [kpc]")
+    #ax[0].set_xlim([xmin,xmax])
+    ax[1].hist(y,bins=ny,range=[ymin, ymax])
+    ax[1].set_xlabel("Y [kpc]")
+    #ax[1].set_xlim([ymin,ymax])
+    ax[2].hist(m/1e8,bins=nx)
+    ax[2].set_xlabel("M [1e8 SolMass]")
+    namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
+    plt.tight_layout()
+    plt.savefig(namefig)
+    plt.close()
+    print("Saved "+namefig)
     # numpy.histogram2d returns H with shape (nx_bins, ny_bins) where H[i,j]
     # counts x-bin i and y-bin j. We transpose to (ny, nx) so rows are y.
-    nx,ny = pixel_num,pixel_num
     H, xedges, yedges = np.histogram2d(x, y, bins=[nx, ny],
                                        range=[[xmin, xmax], [ymin, ymax]],
-                                       weights=m)
+                                       weights=m,density=False)  # if density=True, it normalises it to the total density
+    # H is then the distribution of mass for each bin, not the density
+    mass_grid = H.T.copy() # Solar Masses
     # H shape: (nx, ny) -> transpose to (ny, nx)
-    mass_grid = H.T.copy()
 
-    dx = (xmax - xmin) / nx
-    dy = (ymax - ymin) / ny
+    # area of the (dx/dy) edges of bins:
+    dx = (xmax - xmin) / nx #kpc
+    dy = (ymax - ymin) / ny #kpc
+    # density_ij = M_ij/(Area_bin_ij)
     density = mass_grid / (dx * dy)
 
     if plot:
         extent = [xmin,xmax,ymin,ymax]
-        plt.imshow(density,extent=extent, cmap=plt.cm.gist_earth_r)
-        plt.scatter(x,y,c="w",marker=".")
+        plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
+        plt.colorbar()
+        #plt.scatter(x,y,c="w",marker=".")
         plt.xlim([xmin,xmax])
         plt.ylim([ymin,ymax])
         namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"
@@ -178,7 +236,15 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     dens_Ms_arcsec2 = dens/(dP**2)  # Msun /''^2 
     dens_Ms_kpc2    = dens_Ms_arcsec2*(arcXkpc**2) # Msun/kpc^2
     """   
-    dens_Ms_kpc2    = dens 
+    print("DEBUG ")
+    print("M(density)",np.sum(mass_grid))
+    print("M(m)",np.sum(m))
+    print("M(gal)/h",Gal.M_tot/Gal.h)
+    print("M(gal2)/h",Gal.M/Gal.h)
+    dens_Ms_kpc2    = density*u.Msun/(u.kpc*u.kpc)
+    print("dx,dy",dx,dy)
+    print("area",dx*dy,"kpc^2")
+    print("<density>",np.mean(dens_Ms_kpc2))
     z_source        = get_z_source(cosmo,z_lens,dens_Ms_kpc2=dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose)
     if z_source==0:
         raise AttributeError("Rerun trying different projection")
@@ -192,6 +258,24 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
         print("Saved "+Gal.dens_res)
     # still consider the dP -> has to convert from kpc/pix to ''/pix
     return res
+
+def sersic_brightness(x,y,n=4,I=10):
+    # rotate the galaxy by the angle self.pa
+    #x = np.cos(self.pa)*(x-self.ys1)+np.sin(self.pa)*(y2-self.ys2)
+    #y = -np.sin(self.pa)*(y1-self.ys1)+np.cos(self.pa)*(y2-self.ys2)
+    # include elliptical isophotes
+    try:
+        # ugly but useful
+        x=x.value
+        y=y.value
+    except:
+        pass
+    r = np.sqrt((x)**2+(y)**2)
+    # brightness at distance r
+    bn = 1.992*n - 0.3271
+    re = 5.0
+    brightness = I*np.exp(-bn*((r/re)**(1.0/n)-1.0))
+    return brightness
 
 
 if __name__=="__main__":
@@ -212,6 +296,8 @@ if __name__=="__main__":
     z_source_max  = args.z_source_max
     
     if rerun:
+        #print("DEBUG -- USING test sym")
+        #Gal = get_rnd_gal(sim=test_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
         Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
         Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
         mkdir(Gal.proj_dir)
@@ -247,7 +333,7 @@ if __name__=="__main__":
             raise RuntimeError()
     except:
         dens_Ms_kpc2,radius,dP,cosmo = get_dens_map_rotate_hist(Gal=Gal,pixel_num=pixel_num,
-                                                           z_source_max=z_source_max,verbose=verbose)
+                                                           z_source_max=z_source_max,verbose=True)#verbose=verbose)
     Xg, Yg  = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num] # kpc
     arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
     
@@ -302,25 +388,6 @@ if __name__=="__main__":
     num_aRa  *=u.arcsec
     num_aDec *=u.arcsec
     #print("num_aRa,unit",num_aRa.unit) #*u.arcsec
-    
-    def sersic_brightness(x,y,n=4,I=10):
-        # rotate the galaxy by the angle self.pa
-        #x = np.cos(self.pa)*(x-self.ys1)+np.sin(self.pa)*(y2-self.ys2)
-        #y = -np.sin(self.pa)*(y1-self.ys1)+np.cos(self.pa)*(y2-self.ys2)
-        # include elliptical isophotes
-        try:
-            # ugly but useful
-            x=x.value
-            y=y.value
-        except:
-            pass
-        r = np.sqrt((x)**2+(y)**2)
-        # brightness at distance r
-        bn = 1.992*n - 0.3271
-        re = 5.0
-        brightness = I*np.exp(-bn*((r/re)**(1.0/n)-1.0))
-        return brightness
-    
     
     #ra,dec = util.array2image(RAg),util.array2image(DECg)
     print("DEBUG: shape Xg,num_aRa",np.shape(Xg),np.shape(num_aRa))

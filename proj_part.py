@@ -76,12 +76,11 @@ def basic_get_radius(RAs,DECs):
     assert(decmax<=radius)
     return radius
 
-def get_radius(RAs,DECs):
-    # if there are single particles on the outlier it would consider 
-    # a lot of empty space
+def get_radius(RAs,DECs,sigmas=6):
+    # cut-out outlier particles 
     rad_max = basic_get_radius(RAs,DECs)
     # we take 6 <sigmas> of 
-    rad_min = 6*(np.std(RAs)+np.std(DECs))/2
+    rad_min = sigmas*(np.std(RAs)+np.std(DECs))/2
     return np.min([rad_max,rad_min])
     
 def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose):
@@ -93,9 +92,16 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
         # to do : deal with this
         raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
         #return 0
+    try:
+        dens_Ms_kpc2.value
+    except:
+        # dens_Ms_kpc2 is already given in Msun/kpc^2
+        dens_Ms_kpc2 *= u.Msun/(u.kpc**2)
+    print("DEBUG z_lens",z_lens)
+    print("DEBUG cosmo.angular_diameter_distance(z_lens)",cosmo.angular_diameter_distance(z_lens))
     max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
     print("DEBUG NOTE: the approx MW surf.dens. is 2*1e9Msun/kpc^2")
-    print("DEBUG\n","np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2))
+    print("DEBUG\n","np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2.to("1e9Msun/kpc^2")))
     print("DEBUG\n","max_DsDds",max_DsDds)
     max_DsDds = max_DsDds.to("") # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
     max_DsDds = max_DsDds.value # dimensionless
@@ -325,6 +331,24 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     # still consider the dP -> has to convert from kpc/pix to ''/pix
     return res
 
+def sersic_brightness(x,y,n=4,I=10):
+    # rotate the galaxy by the angle self.pa
+    #x = np.cos(self.pa)*(x-self.ys1)+np.sin(self.pa)*(y2-self.ys2)
+    #y = -np.sin(self.pa)*(y1-self.ys1)+np.cos(self.pa)*(y2-self.ys2)
+    # include elliptical isophotes
+    try:
+        # ugly but useful
+        x=x.value
+        y=y.value
+    except:
+        pass
+    r = np.sqrt((x)**2+(y)**2)
+    # brightness at distance r
+    bn = 1.992*n - 0.3271
+    re = 5.0
+    brightness = I*np.exp(-bn*((r/re)**(1.0/n)-1.0))
+    return brightness
+    
 
 if __name__=="__main__":
     parser = ArgumentParser(description="Project particles into a mass sheet")
@@ -434,24 +458,6 @@ if __name__=="__main__":
     num_aRa  *=u.arcsec
     num_aDec *=u.arcsec
     #print("num_aRa,unit",num_aRa.unit) #*u.arcsec
-    
-    def sersic_brightness(x,y,n=4,I=10):
-        # rotate the galaxy by the angle self.pa
-        #x = np.cos(self.pa)*(x-self.ys1)+np.sin(self.pa)*(y2-self.ys2)
-        #y = -np.sin(self.pa)*(y1-self.ys1)+np.cos(self.pa)*(y2-self.ys2)
-        # include elliptical isophotes
-        try:
-            # ugly but useful
-            x=x.value
-            y=y.value
-        except:
-            pass
-        r = np.sqrt((x)**2+(y)**2)
-        # brightness at distance r
-        bn = 1.992*n - 0.3271
-        re = 5.0
-        brightness = I*np.exp(-bn*((r/re)**(1.0/n)-1.0))
-        return brightness
     
     
     #ra,dec = util.array2image(RAg),util.array2image(DECg)

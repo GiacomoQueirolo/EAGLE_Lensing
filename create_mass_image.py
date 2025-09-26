@@ -25,8 +25,8 @@ from python_tools.get_res import load_whatever
 
 
 z_source_max = 5
-verbose = True
-pixel_num = 100j
+verbose      = True
+pixel_num    = 150j
 ################################################
 # debugging funct.
 
@@ -97,19 +97,20 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
     x -=Cx
     y -=Cy
 
+    print("DEBUG\n",type(x))
 
-    x = np.asarray(x)
-    y = np.asarray(y)
-    m = np.asarray(m, dtype=float)
+    x = np.asarray(x.to("kpc"))
+    y = np.asarray(y.to("kpc"))
+    m = np.asarray(m.to("solMass")/1e8, dtype=float) #unit of 10^12 solar masses
 
     print("DEBUG")
     fig, ax = plt.subplots(3)
     ax[0].hist(x)
-    ax[0].set_title("X")
-    ax[0].hist(y)
-    ax[1].set_title("Y")
-    ax[0].hist(M)
-    ax[2].set_title("M")
+    ax[0].set_xlabel("X [kpc]")
+    ax[1].hist(y)
+    ax[1].set_xlabel("Y [kpc]")
+    ax[2].hist(m)
+    ax[2].set_xlabel("M [1e8 SolMass]")
     namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
     plt.savefig(namefig)
     plt.close()
@@ -124,30 +125,38 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
         print("<Xs>",np.mean(x))
         print("tot mass",np.sum(m))
     
-    x,y = x.to("kpc").value,y.to("kpc").value
-    radius    = get_radius(x_kde,y_kde) #kpc
-    xmin = x-radius
-    ymin = y-radius
-    xmax = x+radius
-    ymax = y+radius
-    
+    #x,y = x.to("kpc").value,y.to("kpc").value
+    radius    = get_radius(x,y) #kpc
+    """
+    xmin = Cx.to("kpc").value-radius
+    ymin = Cy.to("kpc").value-radius
+    xmax = Cx.to("kpc").value+radius
+    ymax = Cy.to("kpc").value+radius
+    """
+    # I think the following is wrong: it should be centered around 0 bc X,Y already recentered
+    xmin = - radius
+    ymin = - radius
+    xmax = + radius
+    ymax = + radius
+
     # numpy.histogram2d returns H with shape (nx_bins, ny_bins) where H[i,j]
     # counts x-bin i and y-bin j. We transpose to (ny, nx) so rows are y.
-    nx,ny = pixel_num,pixel_num
+    nx,ny = int(pixel_num.imag),int(pixel_num.imag)
     H, xedges, yedges = np.histogram2d(x, y, bins=[nx, ny],
                                        range=[[xmin, xmax], [ymin, ymax]],
                                        weights=m)
     # H shape: (nx, ny) -> transpose to (ny, nx)
     mass_grid = H.T.copy()
 
-    dx = (xmax - xmin) / nx
-    dy = (ymax - ymin) / ny
+    dx      = (xmax - xmin) / nx
+    dy      = (ymax - ymin) / ny
     density = mass_grid / (dx * dy)
 
 
     extent = [xmin,xmax,ymin,ymax]
-    plt.imshow(density,extent=extent, cmap=plt.cm.gist_earth_r)
-    plt.scatter(x,y,c="w",marker=".")
+    plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
+    plt.colorbar()
+    #plt.scatter(x,y,c="w",marker=".")
     plt.xlim([xmin,xmax])
     plt.ylim([ymin,ymax])
     namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"

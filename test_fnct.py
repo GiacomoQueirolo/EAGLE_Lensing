@@ -1,3 +1,5 @@
+# copy of fnct, trying to solve the y-split problem
+
 import glob
 import h5py
 import pickle
@@ -24,142 +26,11 @@ from python_tools.tools import mkdir
 #                                |_snaphots_of_gals (obtained from particles)
 
 # data path
-part_data_path = "/pbs/home/g/gqueirolo/EAGLE/data/"
-# "Standard" simulation
-# use the following only as test case
-#std_sim  = "RefL0012N0188"
-std_sim  = "RefL0025N0752"
-test_sim = "RefL0012N0188"
-sim_path = part_data_path+std_sim+"/"
-# Where to store the galaxies
-gal_dir = sim_path+"/Gals"
-mkdir(gal_dir)
-# from https://dataweb.cosma.dur.ac.uk:8443/eagle-snapshots/
-# valid fo all sims apart the variable IMF runs
-kw_snap_z = {"28":0, "27":0.1, "26":0.18, "25":0.27, "24":0.37, "23":0.5, "22":0.62, "21":0.74, "20":0.87, "19":1, "18":1.26, "17":1.49, "16":1.74, "15":2.01, "14":2.24, "13":2.48, "12":3.02, "11":3.53, "10":3.98, "9":4.49, "8":5.04, "7":5.49, "6":5.97, "5":7.05, "4":8.07, "3":8.99, "2":9.99, "1":15.13, "0":20}
-#inverted kw
-kw_z_snap = {}
-for k in kw_snap_z:
-    kw_z_snap[kw_snap_z[k]] = k
-# z indexes
-z_index = np.array([float(f) for f in list(kw_z_snap.keys())])
+from fnct import part_data_path, std_sim,sim_path,gal_dir
 
-# Useful functions:
-###################
+from fnct import get_z,get_snap,get_z_snap,prepend_str,get_files
 
-def get_z(snap):
-    snap = str(snap)
-    while snap[0]=="0" and snap!="0":
-        snap = snap[1:]
-    return kw_snap_z[snap]
 
-def get_snap(z,_ln_snap=None):
-    # consider a continous z instead of the discreet version
-    # works for discreet z as well
-    key_z = min(kw_z_snap.keys(),key=lambda k:np.abs(k-float(z)))
-    snap  = str(kw_z_snap[key_z])
-    snap  = prepend_str(snap,ln_str=_ln_snap,fill=0)
-    return snap
-
-def get_z_snap(z=None,snap=None):
-    if z is None and snap is None:
-        raise UserWarning("Give either z or snap")
-    if z is None:
-        z = get_z(snap)
-    else:
-        snap = get_snap(z)
-    return z,snap
-    
-def prepend_str(str_i,ln_str,fill="0"):
-    if ln_str is None:
-        return str_i
-    str_i = str(str_i)
-    fill  = str(fill) 
-    while len(str_i)<ln_str:
-        str_i=fill+str_i
-    return str_i
-
-def get_files(sim,z=None,snap=None,_i_="*"):
-    """
-    Find the files 
-    If _i_ is specified, only that specific subsection of the snapshot (useful for DM)
-    If no redshift/snapshots are defined, take all of them
-    """
-    
-    sim_path = part_data_path+"/"+sim
-    # find the files
-    _i_ = str(_i_)
-    pstring = "???"
-    suffix = "p"+pstring+"."+_i_+".hdf5"
-    prefix = sim_path+"/snapshot_"
-    if z is None and snap is None:
-        # take all snapshots/all redshifts
-        snap ="0??"
-        zstr = "???"
-    else:
-        if z is not None and snap is not None:
-            # verify that they are compatible:
-            assert int(get_snap(z))==int(snap)
-        if z is not None:
-            zstr = str(int(z))
-            snap = get_snap(z)
-        elif snap is not None:
-            zstr = str(get_z(snap))
-        snap = prepend_str(snap,ln_str=3,fill="0")
-        zstr = prepend_str(zstr,ln_str=3,fill="0")
-    
-    fix  = f"{snap}_z{zstr}p{pstring}/snap_{snap}_z{zstr}"
-    file_string = prefix+fix+suffix
-    #print("#DEBUG")
-    #print(file_string)
-    files = glob.glob(file_string)
-    # checking that the files are not empty
-    assert files != []
-    return files
-
-# ugly fnct but should be correct:
-def get_simsize(sim_name):
-    return int(sim_name.split("L")[1].split("N")[0])
-"""
-# discontinued
-def stnd_read_dataset(itype, att,
-                 z=None,snap=None,
-                 sim=std_sim):
-    # Read a selected dataset:
-    #    - itype is the PartType (stars,gas etc) 
-    #    - att is the attribute name (Group, Subgroup etc). 
-    #    If no redshift/snapshots are define, take all of them
-    
-    # Output array.
-    data  = []
-    files = get_files(sim=sim,z=z,snap=snap)
-    # Loop over each file and extract the data.
-    for i,file in enumerate(files):
-        with h5py.File(file, 'r') as f:
-            tmp = f['PartType%i/%s'%(itype, att)][...]
-            data.append(tmp)
-            if i==0:
-                # Get conversion factors.
-                cgs     = f['PartType%i/%s'%(itype, att)].attrs.get('CGSConversionFactor')
-                aexp    = f['PartType%i/%s'%(itype, att)].attrs.get('aexp-scale-exponent')
-                hexp    = f['PartType%i/%s'%(itype, att)].attrs.get('h-scale-exponent')
-        
-                # Get expansion factor and Hubble parameter from the header.
-                a       = f['Header'].attrs.get('Time')
-                h       = f['Header'].attrs.get('HubbleParam')
-
-    # Combine to a single array.
-    if len(tmp.shape) > 1:
-        data = np.vstack(data)
-    else:
-        data = np.concatenate(data)
-
-    # Convert to physical.
-    if data.dtype != np.int32 and data.dtype != np.int64:
-        data = np.multiply(data, cgs * a**aexp * h**hexp, dtype='f8')
-
-    return data
-"""
 
 # DEBUG
 def read_dataset(itype, att, z=None, snap=None, sim=std_sim):
@@ -230,7 +101,6 @@ def read_dataset(itype, att, z=None, snap=None, sim=std_sim):
         plt.savefig(namefig)
         plt.close()
         print("Saved "+namefig) 
-    """
     if att=="GroupNumber":
         print("Groupnumber shape")
         print(np.shape(data))
@@ -239,7 +109,6 @@ def read_dataset(itype, att, z=None, snap=None, sim=std_sim):
         plt.tight_layout()
         plt.savefig(namefig)
         plt.close()
-    """
     return data
 # my version:
 """
@@ -406,19 +275,6 @@ class Galaxy:
         # and 1/(a^1 *h^-1) = h/a for coords
         # but is more correctly defined as
         # 1/(a^aexp * h^hexp)
-        """
-        aexp = self.aexp[varType]
-        hexp = self.hexp[varType]
-        if varType=="Coordinates":
-            np.testing.assert_almost_equal(aexp,1)
-            np.testing.assert_almost_equal(hexp,-1)
-        elif varType=="Mass":
-            np.testing.assert_almost_equal(aexp,0)
-            np.testing.assert_almost_equal(hexp,-1)
-        hexp = 0
-        return  1/((self.a**aexp)*(self.h**hexp))
-        """
-    
         # AS DEFINED: ALL COORDS IN Mpc/cMpc. NO 1/h FACTOR! 
         # hence the correction factor must not correct for h
         aexp = self.aexp[varType]
@@ -607,7 +463,6 @@ def read_galaxy(itype,gn,sgn,z,snap,boxsize,h,centre):
 
     # Periodic wrap coordinates around centre.
     boxsize = boxsize/h # this should in principle be def. by hexp, but it's way easier like this
-    centre  = np.array(centre)/h # I'm pretty sure that the centre has to be corrected for h as well, as the coordinates and the boxsize
     for i,axi in enumerate(ax):
         axi.axvline(centre[i],c="k",ls="--",label="cnt")
         axi.axvline(centre[i]+boxsize*.5,c="r",label="box (h corrected)")
@@ -617,8 +472,7 @@ def read_galaxy(itype,gn,sgn,z,snap,boxsize,h,centre):
         axi.axvline(centre[i]/h+boxsize*.5,c="orange",label="box (also cnt/h)")
         axi.axvline(centre[i]/h-boxsize*.5,c="orange")
         """
-        rt = np.mean(data['coords'].T[i])/centre[i]
-        # very close to h
+        rt = centre[i]/np.mean(data['coords'].T[i])
         print("ratio",rt,1/rt)
         print("h",h)
 
