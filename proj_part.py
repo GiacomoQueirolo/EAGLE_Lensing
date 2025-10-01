@@ -97,10 +97,16 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
     except:
         # dens_Ms_kpc2 is already given in Msun/kpc^2
         dens_Ms_kpc2 *= u.Msun/(u.kpc**2)
+    assert dens_Ms_kpc2.unit==u.solMass/(u.kpc**2)
     print("DEBUG z_lens",z_lens)
+    print("DEBU cosmo",cosmo)
     print("DEBUG cosmo.angular_diameter_distance(z_lens)",cosmo.angular_diameter_distance(z_lens))
-    max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
     print("DEBUG NOTE: the approx MW surf.dens. is 2*1e9Msun/kpc^2")
+    print("DEBUG np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2))
+    print("DEBUG 4*np.pi*const.G",4*np.pi*const.G)
+    print("DEBUG cosmo.angular_diameter_distance(z_lens)",cosmo.angular_diameter_distance(z_lens))
+    print("DEBUG (const.c**2) ",(const.c**2) )
+    max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
     print("DEBUG\n","np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2.to("1e9Msun/kpc^2")))
     print("DEBUG\n","max_DsDds",max_DsDds)
     max_DsDds = max_DsDds.to("") # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
@@ -111,7 +117,7 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
     min_DsDds = min_DsDds.to("") # dimensionless
     min_DsDds = min_DsDds.value
     
-    z_source_range = np.linspace(z_lens+0.001,z_source_max,100) # it's a very smooth funct->
+    z_source_range = np.linspace(z_lens+0.09,z_source_max,100) # it's a very smooth funct->
     DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
     if not min_DsDds<max_DsDds:
         # to do: deal with this kind of output
@@ -120,8 +126,8 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
             # debug:
             # verify the computation
             print("DEBUG")
-            plt.axhline(max_DsDds,ls="--",c="r",label="dens*4pi*G*Dl/c^2")
-            plt.plot(z_source_range,DsDds,ls="-",c="k",label="Ds/Dds(z_source)")
+            plt.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
+            plt.axhline(max_DsDds,ls="--",c="r",label=r"max(dens)*4$\pi$*G*$D_l$/c$^2$")
             plt.legend()
             name = "tmp/DsDds.pdf"
             plt.savefig(name)
@@ -138,14 +144,14 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
             print("Chosen z_source:", np.round(z_source,2))
         return z_source
         
-def get_dens_map_rotate(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose):
+def get_dens_map_rotate(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,plot=False):
     # try all projection in order to obtain a lens
     proj_index = 0
     res = None
     while proj_index<3:
         try:
             res = get_dens_map_main(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
-                                    z_source_max=z_source_max,verbose=verbose)
+                                    z_source_max=z_source_max,verbose=verbose,plot=plot)
             break
         except AttributeError:
             # should only be if the minimum z_source is higher than the maximum z_source
@@ -158,7 +164,10 @@ def get_dens_map_rotate(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbos
         
 def get_dP(radius_kpc,pixel_num,arcXkpc=None,cosmo=None,Gal=None):
     if arcXkpc is None:
+        if cosmo is None or Gal is None:
+            raise RuntimeError("Give either arcXkpc or cosmo and Gal")
         arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
+            
     try:
         radius_kpc.value 
     except AttributeError:
@@ -277,6 +286,7 @@ def get_dens_map_main(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
         print("fit_kde max",np.max(fit_kde))
     dens    = np.reshape(fit_kde, Xg.shape).T # Msun/pix^2 
     if plot:
+        # plot dens map
         """
         fig, ax = plt.subplots(2)
         ax[0].contour(Xg, Xg, dens.value)
@@ -357,7 +367,8 @@ if __name__=="__main__":
     parser.add_argument("-zsm","--z_source_max",dest="z_source_max",type=float, help="Maximum source redshift",default=z_source_max)
     parser.add_argument("-nrr", "--not_rerun", dest="rerun", 
                         default=True,action="store_false",help="if True, rerun code")
-
+    parser.add_argument("-pl", "--plot", dest="plot", 
+                        default=False,action="store_true",help="Plot dens map")
     parser.add_argument("-v", "--verbose", dest="verbose", 
                         default=False,action="store_true",help="verbose")
     args          = parser.parse_args()
@@ -366,7 +377,7 @@ if __name__=="__main__":
     dir_name      = args.dir_name
     verbose       = args.verbose
     z_source_max  = args.z_source_max
-    
+    plot          = args.plot
     if rerun:
         Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
         Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
@@ -403,7 +414,7 @@ if __name__=="__main__":
             raise RuntimeError()
     except:
         dens_Ms_kpc2,radius,dP,cosmo = get_dens_map_rotate(Gal=Gal,pixel_num=pixel_num,
-                                                           z_source_max=z_source_max,verbose=verbose)
+                                                           z_source_max=z_source_max,verbose=verbose,plot=plot)
     Xg, Yg  = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num] # kpc
     arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
     
@@ -465,6 +476,7 @@ if __name__=="__main__":
     
     ra  = Xg.reshape(num_aRa.shape)*arcXkpc/u.pix  # not entirely sure this unit is correct, but anyway it's just book-keeping
     dec = Yg.reshape(num_aDec.shape)*arcXkpc/u.pix  
+    """
     print("DEBUG")
     plt.imshow(ra.value)
     plt.colorbar()
@@ -507,6 +519,51 @@ if __name__=="__main__":
     plt.title("Log Lensed Sersic image")
     im_name = f"{Gal.proj_dir}/lensed_im.pdf"
     plt.savefig(im_name)
+    plt.close()
+    print("Saving "+im_name)
+    """
+    fg,ax=plt.subplots(2,3,figsize=(16,8))
+    ax[0][0].imshow(ra.value)
+    #ax[0].colorbar()
+    ax[0][0].set_title("Ra source")
+    #im_name = f"{Gal.proj_dir}/ra_src.pdf"
+    #im_name = f"tmp/ra_src.pdf"
+    #plt.savefig(im_name)
+    #plt.close()
+    ax[0][1].imshow(dec.value)
+    #ax[1].colorbar()
+    ax[0][1].set_title("Dec source")
+    #im_name = f"{Gal.proj_dir}/dec_src.pdf"
+    #im_name = f"tmp/dec_src.pdf"
+    #.savefig(im_name)
+    #plt.close()
+    ax[0][2].imshow(np.log10(sersic_brightness(ra,dec)) )
+    #ax[2].colorbar()
+    ax[0][2].set_title("log Source")
+    #im_name = f"{Gal.proj_dir}/src.pdf"
+    """
+    im_name = f"src.pdf"
+    plt.savefig(im_name)
+    plt.show()
+    plt.close()
+    
+    fg,ax=plt.subplots(1,3,figsize=(16,8))
+    """
+    
+    ax[1][0].imshow(num_aRa)
+    #plt.colorbar()
+    ax[1][0].set_title("Ra deflection")
+    ax[1][1].imshow(num_aDec)
+    ax[1][1].set_title("Dec deflection")
+    ra_im  = ra.value-num_aRa
+    dec_im = dec.value-num_aDec
+    lensed_im = sersic_brightness(ra_im,dec_im)
+    ax[1][2].imshow(np.log10(lensed_im))
+    ax[1][2].set_title("Log Lensed Sersic image")
+    #im_name = f"tmp/lensed_im.pdf"
+    im_name = f"lensed_im.pdf"
+    plt.savefig(im_name)
+    plt.show()
     plt.close()
     print("Saving "+im_name)
     

@@ -18,7 +18,8 @@ from lenstronomy.LensModel import convergence_integrals
 #from lenstronomy.Util import util
 
 from fnct import gal_dir,std_sim
-from get_gal_indexes import get_rnd_gal
+#from get_gal_indexes import get_rnd_gal
+from remade_gal import get_rnd_NG
 
 from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
@@ -51,11 +52,11 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
     
     # Concatenate particle properties
     # the unit is Mpc/h -> has to be converted to Mpc. Meaning that the value has to be divided by h
-    x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc/Gal.h # now in Mpc
-    y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc/Gal.h # now in Mpc
-    z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc/Gal.h # now in Mpc
+    x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc # now in Mpc
+    y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc # now in Mpc
+    z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc # now in Mpc
     #  print("QUESTION: do we have to convert also the mass by h") -> I think we have to
-    m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun/Gal.h
+    m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun
 
     """
     # From https://academic.oup.com/mnras/article/470/1/771/3807086
@@ -71,14 +72,11 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
     SmoothBH   = Gal.bh["smooth"]     # in Mpc/h
     smooth     = np.concatenate([SmoothDM,SmoothStar,SmoothGas,SmoothBH])
     """
-    # DEBUG
-    max_diam = np.max([np.max(x.value) - np.min(x.value),np.max(y.value) - np.min(y.value),np.max(z.value) - np.min(z.value)])*u.Mpc
-    print("DEBUG","max_diam",max_diam)
-    
+
     # center around the center of the galaxy
     # correct from cMpc/h to Mpc/h
     # then from Mpc/h to Mpc
-    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov*Gal.h) # this should be now in Mpc
+    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov) # this should be now in Mpc
     
     # projection along given indexes
     # xy : ind=0
@@ -111,7 +109,8 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
     ax[1].set_xlabel("Y [kpc]")
     ax[2].hist(m)
     ax[2].set_xlabel("M [1e8 SolMass]")
-    namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
+    #namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
+    namefig = f"./tmp/cmi_hist1D_{proj_index}.png"
     plt.savefig(namefig)
     plt.close()
     print("Saved "+namefig)
@@ -126,7 +125,7 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
         print("tot mass",np.sum(m))
     
     #x,y = x.to("kpc").value,y.to("kpc").value
-    radius    = get_radius(x,y) #kpc
+    radius    = get_radius(x,y,sigmas=4) #kpc
     """
     xmin = Cx.to("kpc").value-radius
     ymin = Cy.to("kpc").value-radius
@@ -147,19 +146,26 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
                                        weights=m)
     # H shape: (nx, ny) -> transpose to (ny, nx)
     mass_grid = H.T.copy()
+    print("radius [kpc]",radius)
 
     dx      = (xmax - xmin) / nx
     dy      = (ymax - ymin) / ny
     density = mass_grid / (dx * dy)
+    print("dx,dy",dx,dy)
+    print("area",dx*dy,"kpc^2")
+    print("<mass>",np.mean(mass_grid))
+    print("<density>",np.mean(density))
 
 
     extent = [xmin,xmax,ymin,ymax]
     plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
+    levels = np.logspace(-4,-1)
+    #plt.contour(np.log10(density),extent=extent,levels=levels,norm="log")
     plt.colorbar()
-    #plt.scatter(x,y,c="w",marker=".")
     plt.xlim([xmin,xmax])
     plt.ylim([ymin,ymax])
-    namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"
+    #namefig = f"{Gal.proj_dir}/densmap_proj_{proj_index}.png"
+    namefig = f"./tmp/cmi_densmap_proj_{proj_index}.png"
     plt.savefig(namefig)
     plt.close()
     print("Saved "+namefig)
@@ -180,9 +186,10 @@ if __name__=="__main__":
     pixel_num     = args.pixel_num*1j
     rerun         = args.rerun
     dir_name      = args.dir_name
-    verbose       = args.verbose
+    verbose       = True#args.verbose
     z_source_max  = args.z_source_max
-    
+
+    """
     if rerun:
         Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
         Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
@@ -205,7 +212,11 @@ if __name__=="__main__":
             print("Warning: running test")
         elif int(pixel_num.imag)>=1000:
             print("Warning: running very long")
- 
+    """
+    Gal = get_rnd_NG()
+    Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
+    mkdir(Gal.proj_dir)
+    Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
     plot_dens_map_hist(Gal=Gal,pixel_num=pixel_num, z_source_max=z_source_max,verbose=verbose)
     
     print("Success")

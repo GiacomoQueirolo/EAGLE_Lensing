@@ -12,7 +12,7 @@ import os,copy
 
 from python_tools.get_res import load_whatever
 from sql_connect import exec_query
-from fnct import std_sim,gal_dir
+from fnct import Galaxy,gal_dir,get_z,std_sim,gal_dir
 
 def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl_name="massive_gals.pkl",plot=True,check_prev=True):
     pkl_path = f"{gal_dir}/{pkl_name}" 
@@ -78,4 +78,40 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl
     """
     return myData
 
+
+def get_rnd_gal(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True,reuse_previous=True):
+    if reuse_previous:
+        # note: this way we will always use the same
+        # TODO: randomly select within the acceptable ones
+        for snap_dir in os.listdir(gal_dir):
+            if "snap_" in snap_dir:
+                snap = snap_dir.split("_")[1].split("/")[0]
+                z_gl = get_z(int(snap))
+                if z_gl<int(max_z) and z_gl>int(min_z):
+                    for gl in os.listdir(gal_dir+"/"+snap_dir):
+                        print(gal_dir+"/"+snap_dir+"/"+gl)
+                        Gal = load_whatever(gal_dir+"/"+snap_dir+"/"+gl)
+                        if Gal.M_tot>float(min_mass):
+                            print("Found previous Gal "+str(Gal))
+                            return Gal
+        print("Previous Gal not found")
+        reuse_previous = False
+    if not reuse_previous:
+        data  = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,pkl_name=pkl_name,check_prev=check_prev,plot=False,save_pkl=save_pkl)
+        Gal = _get_rnd_gal(data)
+    return Gal
+
+
+def _get_rnd_gal(data):
+    index = np.arange(len(data["z"]))
+    rnd_i = np.random.choice(index)
+    kw = {}
+    for k in data.keys():
+        if k=="query" or k=="sim":
+            kw[k] = data[k]
+        else:
+            kw[k] = data[k][rnd_i]
+
+    Gal = Galaxy(**kw)
+    return Gal
 

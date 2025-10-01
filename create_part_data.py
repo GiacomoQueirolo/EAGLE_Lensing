@@ -14,7 +14,8 @@ from astropy import units as u
 from astropy.cosmology import FlatLambdaCDM
 
 from fnct import std_sim
-from get_gal_indexes import get_rnd_gal
+#from get_gal_indexes import get_rnd_gal
+from remade_gal import get_rnd_NG
 
 filename = "particles_EAGLE.csv"
 path     = "./EAGLE_prt_data/"
@@ -28,8 +29,8 @@ if __name__=="__main__":
     filename      = args.filename
     if ".csv"!=filename[-4:]:
         filename +=".csv"
-    Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False)
-    
+    #Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False)
+    Gal = get_rnd_NG(sim=std_sim,check_prev=False)
     Xstar,Ystar,Zstar = Gal.stars["coords"].T # in Mpc/h
     Xgas,Ygas,Zgas    = Gal.gas["coords"].T # in Mpc/h
     Xdm,Ydm,Zdm       = Gal.dm["coords"].T # in Mpc/h

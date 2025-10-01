@@ -1,6 +1,4 @@
-# further simplification by taking 2D histogram
-# instead of KDE
-# using chatgpt to get it faster 
+# copied from proj_part_hist but now using the "NewGalaxy" class
 
 import os
 import csv
@@ -17,17 +15,16 @@ from astropy import constants as const
 from astropy.cosmology import FlatLambdaCDM
 from lenstronomy.LensModel import convergence_integrals
 
-#from lenstronomy.Util import util
-
-from fnct import gal_dir,std_sim,test_sim
-from get_gal_indexes import get_rnd_gal
+# from lenstronomy.Util import util
+from remade_gal import get_rnd_NG
+#from get_gal_indexes import get_rnd_gal
 
 from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
 
 
 z_source_max = 5
-pixel_num    = 100j
+pixel_num    = 200j
 verbose      = True
 plot_dnsmap  = True
 ################################################
@@ -38,6 +35,7 @@ from proj_part import get_radius,get_z_source,get_dP
 def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,plot=plot_dnsmap):
     # try all projection in order to obtain a lens
     proj_index = 0
+    """
     res = None
     res = get_dens_map_hist(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
                                     z_source_max=z_source_max,verbose=verbose,plot=plot)
@@ -58,18 +56,17 @@ def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,v
         raise RuntimeError("There is no projection of the galaxy that create a lens given the z_source_max")
     else:
         return res
-    """
-        
+
 def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,save_res=True,plot=True):
     nx,ny = int(pixel_num.imag),int(pixel_num.imag)
 
     # given a projection, produce the density map
     # fails if it can't produce a supercritical lens w. z_source<z_source_max
     
-    Xstar,Ystar,Zstar = Gal.stars["coords"].T # in Mpc/h
-    Xgas,Ygas,Zgas    = Gal.gas["coords"].T   # in Mpc/h
-    Xdm,Ydm,Zdm       = Gal.dm["coords"].T    # in Mpc/h
-    Xbh,Ybh,Zbh       = Gal.bh["coords"].T    # in Mpc/h
+    Xstar,Ystar,Zstar = Gal.stars["coords"].T # in Mpc
+    Xgas,Ygas,Zgas    = Gal.gas["coords"].T   # in Mpc
+    Xdm,Ydm,Zdm       = Gal.dm["coords"].T    # in Mpc
+    Xbh,Ybh,Zbh       = Gal.bh["coords"].T    # in Mpc
     
     Mstar = Gal.stars["mass"] # in Msun 
     Mgas  = Gal.gas["mass"]  # in Msun 
@@ -77,34 +74,40 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     Mbh   = Gal.bh["mass"] # in Msun 
     
     # center around the center of the galaxy
-    # correct from cMpc/h to Mpc/h
-    # then from Mpc/h to Mpc
     # center of mass is given in Comiving coord 
-    # see https://arxiv.org/pdf/1510.01320 D.23 -> given that it is not corrected, it should prob
-    # also be corrected for h -> or maybe not?
-    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov*Gal.h) # this should be now in Mpc
+    # see https://arxiv.org/pdf/1510.01320 D.23 
+    # -> given that it is not corrected, it should prob
+    # also be corrected for h -> or maybe not? -> nope, it's given in cMpc (not cMpc/h) fsr
+    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov) # this should be now in Mpc
     
 
     print("DEBUG")
+    # mass factor for particles
+    fact_M = 5e4
     fig, ax = plt.subplots(3)
     for XX,YY,MM,name in zip([Xstar,Xgas,Xdm,Xbh],[Ystar,Ygas,Ydm,Ybh],[Mstar,Mgas,Mdm,Mbh],["star","gas","dm","bh"]):
-        x,y = XX*u.Mpc-Cx,YY*u.Mpc-Cy
+        xx,yy = XX*u.Mpc-Cx,YY*u.Mpc-Cy
+        mm = MM/fact_M
         """radius = get_radius(x,y)
         xmin = -radius
         ymin = -radius
         xmax = +radius
         ymax = +radius
         """
-        ax[0].hist(x,bins=nx,ls='dashed', lw=3,facecolor="None",label=name)#,range=[xmin, xmax])
-        ax[0].set_xlabel("X [kpc]")
+        ax[0].hist(xx,bins=nx,alpha=.5,label=name)#,range=[xmin, xmax])
         #ax[0].set_xlim([xmin,xmax])
-        ax[1].hist(y,bins=ny,ls='dashed', lw=3,facecolor="None",label=name)#,range=[ymin, ymax])
-        ax[1].set_xlabel("Y [kpc]")
+        ax[1].hist(yy,bins=ny,alpha=.5,label=name)#,range=[ymin, ymax])
         #ax[1].set_xlim([ymin,ymax])
-        ax[2].hist(MM/1e8,bins=nx,ls='dashed', lw=3,facecolor="None",label=name)
-        ax[2].set_xlabel("M [1e8 SolMass]")
-        ax[2].legend()
-    namefig = f"{Gal.proj_dir}/hist1D_{proj_index}_part.png"
+        ax[2].hist(mm,alpha=.5,label=name)
+        print("DEBUG tot M "+name,np.sum(mm))
+    ax[0].axvline(0,ls="--",label="centre")
+    ax[1].axvline(0,ls="--",label="centre")
+    ax[0].set_xlabel("X [kpc]")
+    ax[1].set_xlabel("Y [kpc]")
+    ax[2].set_xlabel(f"M [{str(fact_M)} SolMass]")
+    ax[2].legend()
+    #namefig = f"{Gal.proj_dir}/hist1D_{proj_index}_part.png"
+    namefig = f"./tmp/NG_hist1D_{proj_index}_part.png"
     plt.tight_layout()
     plt.savefig(namefig)
     plt.close()
@@ -113,11 +116,11 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     
     # Concatenate particle properties
     # the unit is Mpc/h -> has to be converted to Mpc. Meaning that the value has to be divided by h 
-    # Wrong, they are already given corrected for h
+    # Wrong, they are already given corrected for h -> already in proper/physical units (corrected for h as well)
     x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc#/Gal.h # now in Mpc
     y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc#/Gal.h # now in Mpc
     z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc#/Gal.h # now in Mpc
-    #  print("QUESTION: do we have to convert also the mass by h") -> I think we have to 
+    #  print("QUESTION: do we have to convert also the mass by h") -> I think we have to -> already done
     m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun #/Gal.h
 
     """
@@ -136,8 +139,11 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     """
     # DEBUG
     max_diam = np.max([np.max(x.value) - np.min(x.value),np.max(y.value) - np.min(y.value),np.max(z.value) - np.min(z.value)])*u.Mpc
-    print("DEBUG","max_diam",max_diam)
-    
+    print("DEBUG","max_diam",np.round(max_diam,2))
+
+    print(Cx,Cy,Cz)
+    print(np.mean(x),np.mean(y),np.mean(z))
+    print(np.sum(x*m)/np.sum(m),np.sum(y*m)/np.sum(m),np.sum(y*m)/np.sum(m))
     # projection along given indexes
     # xy : ind=0
     # xz : ind=1
@@ -152,6 +158,12 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
         Cx = copy(Cy)
         y  = copy(z)
         Cy = copy(Cz)
+
+    print("DEBUG np.mean(x),Cx",np.mean(x),Cx)
+    print("DEBUG np.mean(y),Cy",np.mean(y),Cy)
+    print("DEBUG np.median(y),Cy",np.median(y))
+    print("DEBUG np.std(y)",np.std(y))
+    print("DEBUG np.mean(z),Cz",np.mean(z),Cz)
     x -=Cx
     y -=Cy
 
@@ -162,7 +174,11 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     """
     x      = np.asarray(x.to("kpc").value) #kpc
     y      = np.asarray(y.to("kpc").value) #kpc
-    radius = get_radius(x,y)               #kpc
+    #radius = get_radius(x,y)               #kpc
+    radius = 70 #kpc 
+    print("DEBUG very small radius -",radius,"kpc")
+    
+    
     m      = np.asarray(m.to("solMass").value, dtype=float)  # M_sol
     # Redshift: 
     z_lens = Gal.z
@@ -170,20 +186,16 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
         print("z_lens",z_lens)
     cosmo   = FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
     print("DEBUG")
-    print(cosmo)
+    #print(cosmo)
     print("H0",Gal.h*100, "Om0",1-Gal.h)
     
     if verbose:
-        print("<Xs>",np.mean(x))
-        print("tot mass",np.sum(m))
-    
-    # I think the following is wrong: it should be centered around 0 bc X,Y already recentered
-    """
-    xmin = x-radius
-    ymin = y-radius
-    xmax = x+radius
-    ymax = y+radius
-    """
+        print("<X> [kpc]",np.round(np.mean(x),3))
+        print("<Y> [kpc]",np.round(np.mean(y),3))
+        print("radius [kpc]",np.round(radius,3))
+        print("tot mass [1e8 M_sol]",np.round(np.sum(m)/1e8,3))
+        
+    # X,Y already recentered around 0
     xmin = -radius
     ymin = -radius
     xmax = +radius
@@ -200,7 +212,8 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     #ax[1].set_xlim([ymin,ymax])
     ax[2].hist(m/1e8,bins=nx)
     ax[2].set_xlabel("M [1e8 SolMass]")
-    namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
+    #namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
+    namefig = f"./tmp/NG_hist1D_{proj_index}.png"
     plt.tight_layout()
     plt.savefig(namefig)
     plt.close()
@@ -214,7 +227,7 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     mass_grid = H.T.copy() # Solar Masses
     # H shape: (nx, ny) -> transpose to (ny, nx)
 
-    # area of the (dx/dy) edges of bins:
+    # area of the (dx/dy) bins:
     dx = (xmax - xmin) / nx #kpc
     dy = (ymax - ymin) / ny #kpc
     # density_ij = M_ij/(Area_bin_ij)
@@ -222,12 +235,13 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
 
     if plot:
         extent = [xmin,xmax,ymin,ymax]
-        plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
+        plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log",label="Density [Msun/kpc^2]")
         plt.colorbar()
         #plt.scatter(x,y,c="w",marker=".")
         plt.xlim([xmin,xmax])
         plt.ylim([ymin,ymax])
-        namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"
+        #namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"
+        namefig = f"tmp/NG_proj_hist_densmap_{proj_index}.png"
         plt.savefig(namefig)
         plt.close()
         print("Saved "+namefig)
@@ -240,19 +254,22 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     print("DEBUG ")
     print("M(density)",np.sum(mass_grid))
     print("M(m)",np.sum(m))
-    print("M(gal)/h",Gal.M_tot/Gal.h)
-    print("M(gal2)/h",Gal.M/Gal.h)
+    print("M(gal)",Gal.M_tot)
+    print("M(gal2)",Gal.M)
     dens_Ms_kpc2    = density*u.Msun/(u.kpc*u.kpc)
     print("dx,dy",dx,dy)
-    print("area",dx*dy,"kpc^2")
+    print("bin area",dx*dy,"kpc^2")
     print("<density>",np.mean(dens_Ms_kpc2))
-    z_source        = get_z_source(cosmo,z_lens,dens_Ms_kpc2=dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose)
+    print("max(density)",np.max(dens_Ms_kpc2))
+    z_source        = get_z_source(cosmo=cosmo,z_lens=z_lens,
+                            dens_Ms_kpc2=dens_Ms_kpc2,z_source_max=z_source_max,
+                                   verbose=verbose)
     if z_source==0:
         raise AttributeError("Rerun trying different projection")
         
-    dP = get_dP(radius*u.kpc,pixel_num) # ''/pix -> to double check that this is correct
+    dP = get_dP(radius*u.kpc,pixel_num,cosmo=cosmo,Gal=Gal) # ''/pix -> to double check that this is correct
     # store the results
-    res = [dens_Ms_kpc2,radius,dP,cosmo]
+    res = [dens_Ms_kpc2,radius,dP,z_source,cosmo]
     if save_res:
         with open(Gal.dens_res,"wb") as f:
             pickle.dump(res,f)
@@ -260,10 +277,10 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     # still consider the dP -> has to convert from kpc/pix to ''/pix
     return res
 
-def sersic_brightness(x,y,n=4,I=10):
+def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0):
     # rotate the galaxy by the angle self.pa
-    #x = np.cos(self.pa)*(x-self.ys1)+np.sin(self.pa)*(y2-self.ys2)
-    #y = -np.sin(self.pa)*(y1-self.ys1)+np.cos(self.pa)*(y2-self.ys2)
+    #x = np.cos(self.pa)*(x-cntx)+np.sin(self.pa)*(y2-cnty)
+    #y = -np.sin(self.pa)*(y1-cntx)+np.cos(self.pa)*(y2-cnty)
     # include elliptical isophotes
     try:
         # ugly but useful
@@ -271,7 +288,13 @@ def sersic_brightness(x,y,n=4,I=10):
         y=y.value
     except:
         pass
-    r = np.sqrt((x)**2+(y)**2)
+    try:
+        # ugly but useful
+        cntx=cntx.value
+        cnty=cnty.value
+    except:
+        pass
+    r = np.sqrt((x-cntx)**2+(y-cnty)**2)
     # brightness at distance r
     bn = 1.992*n - 0.3271
     re = 5.0
@@ -297,10 +320,11 @@ if __name__=="__main__":
     verbose       = args.verbose
     z_source_max  = args.z_source_max
     plot          = args.plot
+    """
     if rerun:
         #print("DEBUG -- USING test sym")
         #Gal = get_rnd_gal(sim=test_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
-        Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
+        Gal = get_rnd_NG()#sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
         Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
         mkdir(Gal.proj_dir)
         Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
@@ -314,15 +338,46 @@ if __name__=="__main__":
         Gal = empty_class()
         Gal.dens_res = dens_res
         Gal.proj_dir = get_dir_basename(dens_res)[0]
-        
+    """    
+    Gal = get_rnd_NG()
+    z_lens = Gal.z
+    """
+    print("DEBUG")
+    NG = Gal
+    fig, ax = plt.subplots(3)
+    nx = 100
+    for name,part in zip(["stars","dm","gas"],[NG.stars,NG.dm,NG.gas]):
+        coords = part["coords"]
+        x,y,z  = coords.T
+        print(np.std(coords,axis=0))
+        ax[0].hist(x,bins=nx,alpha=.5,label=name)#,range=[xmin, xmax])
+        ax[1].hist(y,bins=nx,alpha=.5,label=name)#,range=[ymin, ymax])
+        ax[2].hist(z,bins=nx,alpha=.5,label=name)#,range=[ymin, ymax])
+    ax[0].set_xlabel("X [kpc]")
+    ax[2].set_xlabel("Z [kpc]")
+    ax[1].set_xlabel("Y [kpc]")
+    ax[2].legend()
+    namefig = f"tmp/hist_by_hand_parts.png"
+    plt.tight_layout()
+    plt.savefig(namefig)
+    plt.close()
+    print("Saved "+namefig) 
+    print("DEBUG")
+    """
+    Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
+    mkdir(Gal.proj_dir)
+    Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
+
     if verbose:
         print("Assumptions: We are considering the maximum source redshift to be ",z_source_max)
         if int(pixel_num.imag)<500:
             print("Warning: running test")
         elif int(pixel_num.imag)>=1000:
             print("Warning: running very long")
-
-
+    dens_Ms_kpc2,radius,dP,z_source,cosmo = get_dens_map_rotate_hist(Gal=Gal,pixel_num=pixel_num,
+                                                    z_source_max=z_source_max,verbose=True)#plot=plot,verbose=verbose)
+    
+    """
     try:
         if rerun:
             raise RuntimeError("Rerunning anyway")
@@ -336,8 +391,9 @@ if __name__=="__main__":
     except:
         dens_Ms_kpc2,radius,dP,cosmo = get_dens_map_rotate_hist(Gal=Gal,pixel_num=pixel_num,
                                                            z_source_max=z_source_max,verbose=True,plot=plot)#verbose=verbose)
-    Xg, Yg  = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num] # kpc
-    arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
+    """
+    Xg, Yg    = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num] # kpc
+    arcXkpc   = cosmo.arcsec_per_kpc_proper(z_lens) # ''/kpc
     
     # create lensed image:
     # dPix it's given by the pixel_num  
@@ -393,39 +449,52 @@ if __name__=="__main__":
     
     #ra,dec = util.array2image(RAg),util.array2image(DECg)
     print("DEBUG: shape Xg,num_aRa",np.shape(Xg),np.shape(num_aRa))
+
+    # define the source to be behind the most dense pixel (not necessarily==CMS)
+    # -> could consider not exactly behind but at least within a small radius of it
+    np.where(kappa_grid==np.max(kappa_grid))
+    
+    #ra_src,dec_src 
+
     
     ra  = Xg.reshape(num_aRa.shape)*arcXkpc/u.pix  # not entirely sure this unit is correct, but anyway it's just book-keeping
     dec = Yg.reshape(num_aDec.shape)*arcXkpc/u.pix  
     print("DEBUG")
+    """
     plt.imshow(ra.value)
     plt.colorbar()
     plt.title("Ra source")
-    im_name = f"{Gal.proj_dir}/ra_src.pdf"
+    #im_name = f"{Gal.proj_dir}/ra_src.pdf"
+    im_name = f"tmp/ra_src.pdf"
     plt.savefig(im_name)
     plt.close()
     plt.imshow(dec.value)
     plt.colorbar()
     plt.title("Dec source")
-    im_name = f"{Gal.proj_dir}/dec_src.pdf"
+    #im_name = f"{Gal.proj_dir}/dec_src.pdf"
+    im_name = f"tmp/dec_src.pdf"
     plt.savefig(im_name)
     plt.close()
     plt.imshow(np.log10(sersic_brightness(ra,dec)) )
     plt.colorbar()
     plt.title("log Source")
-    im_name = f"{Gal.proj_dir}/src.pdf"
+    #im_name = f"{Gal.proj_dir}/src.pdf"
+    im_name = f"tmp/src.pdf"
     plt.savefig(im_name)
     plt.close()
     
     plt.imshow(num_aRa.value)
     plt.colorbar()
     plt.title("Ra deflection")
-    im_name = f"{Gal.proj_dir}/alpha_ra.pdf"
+    #im_name = f"{Gal.proj_dir}/alpha_ra.pdf"
+    im_name = f"tmp/alpha_ra.pdf"
     plt.savefig(im_name)
     plt.close()
     plt.imshow(num_aDec.value)
     plt.colorbar()
     plt.title("Dec deflection")
-    im_name = f"{Gal.proj_dir}/alpha_dec.pdf"
+    #im_name = f"{Gal.proj_dir}/alpha_dec.pdf"
+    im_name = f"tmp/alpha_dec.pdf"
     plt.savefig(im_name)
     plt.close()
     print("DEBUG")
@@ -436,13 +505,36 @@ if __name__=="__main__":
     plt.imshow(np.log10(lensed_im))
     plt.colorbar()
     plt.title("Log Lensed Sersic image")
+    #im_name = f"tmp/lensed_im.pdf"
     im_name = f"{Gal.proj_dir}/lensed_im.pdf"
     plt.savefig(im_name)
     plt.close()
     print("Saving "+im_name)
-    
+    """
+    fg,ax=plt.subplots(2,3,figsize=(16,8))
+    ax[0][0].imshow(ra.value)
+    ax[0][0].set_title("Ra source")
+    ax[0][1].imshow(dec.value)
+    ax[0][1].set_title("Dec source")
+    ax[0][2].imshow(np.log10(sersic_brightness(ra,dec)) )
+    ax[0][2].set_title("log Source")
+    ax[1][0].imshow(num_aRa.value)
+    ax[1][0].set_title("Ra deflection")
+    ax[1][1].imshow(num_aDec.value)
+    ax[1][1].set_title("Dec deflection")
+    ra_im  = ra.value-num_aRa
+    dec_im = dec.value-num_aDec
+    lensed_im = sersic_brightness(ra_im,dec_im)
+    ax[1][2].imshow(np.log10(lensed_im))
+    ax[1][2].set_title("Log Lensed Sersic image")
+    im_name = f"tmp/lensed_im.pdf"
+    plt.savefig(im_name)
+    plt.show()
+    plt.close()
+    print("Saving "+im_name)
+
     # for convenience, I link the result to the tmp dir
-    os.unlink("./tmp/"+dir_name)
-    os.symlink(Gal.proj_dir[:-1],"./tmp/.")
+    #os.unlink("./tmp/"+dir_name)
+    #os.symlink(Gal.proj_dir[:-1],"./tmp/.")
     
     print("Success")

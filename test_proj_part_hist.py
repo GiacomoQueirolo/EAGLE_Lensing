@@ -33,12 +33,12 @@ pixel_num    = 100j
 
 from proj_part import get_radius,get_z_source,get_dP
 
-def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose):
+def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,plot=True):
     # try all projection in order to obtain a lens
     proj_index = 0
     res = None
     res = get_dens_map_hist(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
-                                    z_source_max=z_source_max,verbose=verbose)
+                                    z_source_max=z_source_max,verbose=verbose,plot=plot)
     raise RuntimeError("DEBUG--Arrived here")
     """
     while proj_index<3:
