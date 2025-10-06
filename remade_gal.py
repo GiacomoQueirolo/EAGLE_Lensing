@@ -9,17 +9,21 @@ import matplotlib.pyplot as plt
 
 
 from python_tools.tools import mkdir
-
-from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header_simple
-from fnct import _count_part,_mass_part,get_gal_path
+import astropy.constants as const
 from get_gal_indexes import get_gals
+from fnct import _count_part,_mass_part,get_gal_path
+from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header_simple
 
 # combination btw get_rnd_gal and _get_rnd_gal
-
-min_z    = 0.2
-min_mass = 5e13 # Sol Mass
-def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),max_z="2",pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
-    data  = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,pkl_name=pkl_name,check_prev=check_prev,plot=False,save_pkl=save_pkl)
+z_source_max = 5
+verbose      = True
+min_z        = 0.2
+# max_z is implicitely =3.53
+min_mass     = 5e13 # Sol Mass
+def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),
+                        max_z="2",pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
+    data  = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,
+                     pkl_name=pkl_name,check_prev=check_prev,plot=False,save_pkl=save_pkl)
     index = np.arange(len(data["z"]))
     rnd_i = np.random.choice(index)
     kw = {}
@@ -29,6 +33,110 @@ def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),ma
         else:
             kw[k] = data[k][rnd_i]
     return kw
+
+def basic_get_radius(RAs,DECs):
+    # define a "radius" (more like 1/2 of the edge-lenght) of the grid used to sample the density
+    
+    # We want to have the same pixelscale in the 2Dim
+    # the obvioious way would give RA and DEC that might not be on the same range
+    # but we create a grid with the same number of points for both
+    # we rather would go as such: redefine the ranges such that the number of pixels 
+    # and the ranges are the same (but there might be some empty, ie 0 density, pixels
+    # for either of the two dimensions)
+    ramin  = RAs.min()
+    ramax  = RAs.max()
+    #rangeRa = ramax - ramin
+    decmin = DECs.min()
+    decmax = DECs.max()
+    #rangeDec = decmax-decmin
+    # we have the advantage that the center is set to 0 ->
+    radius =  max([0-ramin,ramax-0,0-decmin,decmax-0])
+    # verify:
+    assert(ramin>=-radius)
+    assert(decmin>=-radius)
+    assert(ramax<=radius)
+    assert(decmax<=radius)
+    return radius
+
+def get_radius(RAs,DECs,sigmas=6):
+    # cut-out outlier particles 
+    rad_max = basic_get_radius(RAs,DECs)
+    # we take 6 <sigmas> of 
+    rad_min = sigmas*(np.std(RAs)+np.std(DECs))/2
+    return np.min([rad_max,rad_min])
+
+def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose):
+    # the lens has to be supercritical
+    # dens>Sigma_crit = (c^2/4PiG D_d(z_lens) ) D_s(z_source)/D_ds(z_lens,z_source)
+    # -> D_s(z_source)/D_ds(z_lens,z_source) < 4PiG D_d(z_lens) *dens/c^2
+    # D_s(z_source)/D_ds(z_lens,z_source) is not easy to compute analytically, but we can sample it
+    if z_lens>z_source_max:
+        raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
+        #return 0
+    try:
+        dens_Ms_kpc2.value
+    except:
+        # dens_Ms_kpc2 is already given in Msun/kpc^2
+        dens_Ms_kpc2 *= u.Msun/(u.kpc**2)
+    assert dens_Ms_kpc2.unit==u.solMass/(u.kpc**2)
+    """
+    print("DEBUG z_lens",z_lens)
+    print("DEBU cosmo",cosmo)
+    print("DEBUG cosmo.angular_diameter_distance(z_lens)",cosmo.angular_diameter_distance(z_lens))
+    print("DEBUG NOTE: the approx MW surf.dens. is 2*1e9Msun/kpc^2")
+    print("DEBUG np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2))
+    print("DEBUG 4*np.pi*const.G",4*np.pi*const.G)
+    print("DEBUG cosmo.angular_diameter_distance(z_lens)",cosmo.angular_diameter_distance(z_lens))
+    print("DEBUG (const.c**2) ",(const.c**2) )
+    """
+    max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
+    #print("DEBUG\n","np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2.to("1e9Msun/kpc^2")))
+    #print("DEBUG\n","max_DsDds",max_DsDds)
+    max_DsDds = max_DsDds.to("") # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
+    max_DsDds = max_DsDds.value # dimensionless
+    #print("DEBUG\n","max_DsDds",max_DsDds)
+    #z_source_range = np.linspace(z_lens,z_source_max,100) # it's a very smooth funct->
+    min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
+    min_DsDds = min_DsDds.to("") # dimensionless
+    min_DsDds = min_DsDds.value
+    
+    z_source_range = np.linspace(z_lens+0.09,z_source_max,100) # it's a very smooth funct->
+    DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
+    if not min_DsDds<max_DsDds:
+        # to do: deal with this kind of output
+        if verbose:
+            print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
+            plt.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
+            plt.axhline(max_DsDds,ls="--",c="r",label=r"max(dens)*4$\pi$*G*$D_l$/c$^2$")
+            plt.legend()
+            name = "tmp/DsDds.pdf"
+            plt.savefig(name)
+            print("Saved "+name)
+        return 0
+    else:
+        # note that the successful test means only that there is AT LEAST 1 PIXEL that is supercritical
+        minimise     = np.abs(DsDds-max_DsDds) 
+        z_source_min = z_source_range[np.argmin(minimise)]
+        # select a random source within the range
+        z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
+        if verbose:
+            print("Minimum z_source:",np.round(z_source_min,2))
+            print("Chosen z_source:", np.round(z_source,2))
+        return z_source
+
+def get_dP(radius_kpc,pixel_num,arcXkpc=None,cosmo=None,Gal=None):
+    if arcXkpc is None:
+        if cosmo is None or Gal is None:
+            raise RuntimeError("Give either arcXkpc or cosmo and Gal")
+        arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc
+            
+    try:
+        radius_kpc.value 
+    except AttributeError:
+        # hoping the radius is actually inserted in kpc
+        radius_kpc *= u.kpc 
+    return 2*radius_kpc*arcXkpc.to("arcsec/kpc")/(int(pixel_num.imag)*u.pix) #''/pix
+
 #itype    = 1 #dm
 # gas,dm, stars,bh : 0,1,4,5 
 class NewGal:
@@ -271,6 +379,9 @@ class NewGal:
         self.get_pkl_path()
         return 0
 
+    #def image(self):
+    # maybe to implement a way to plot it    
+
     def store_gal(self):
         if not hasattr(self,"pkl_path"):
             self.set_gal_path()
@@ -292,6 +403,12 @@ def get_rnd_NG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
     NG       = NewGal(Gn,SGn,M,Centre,std_sim,z)
     return NG
 
+
+def get_lens_dir(Gal):
+    lens_dir = "sim_lens/"+str(Gal.sim)+"/snap"+str(Gal.snap)+"_G"+str(Gal.Gn)+"."+str(Gal.SGn)+"/"
+    mkdir(lens_dir)
+    Gal.lens_dir = lens_dir
+    return lens_dir
 
 
 # for debug:

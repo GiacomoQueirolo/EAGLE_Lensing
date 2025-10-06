@@ -1,4 +1,5 @@
-# further simplification still, just plot 2D projection of the mass map
+# copied from create_mass_image.py (now old)
+# we want to create iso-mass (and maybe iso-phot) contours of the galaxy
 
 import os
 import csv
@@ -25,13 +26,13 @@ from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
 
 
-z_source_max = 5
+from NG_proj_part_hist import z_source_max,pixel_num
+#z_source_max = 5
+#pixel_num    = 150j
 verbose      = True
-pixel_num    = 150j
-################################################
-# debugging funct.
 
-from proj_part import get_radius,get_z_source,get_dP
+
+from remade_gal import get_z_source,get_dP #get_radius
 
 
 
@@ -55,29 +56,15 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
     x = np.concatenate([Xdm, Xstar, Xgas, Xbh])*u.Mpc # now in Mpc
     y = np.concatenate([Ydm, Ystar, Ygas, Ybh])*u.Mpc # now in Mpc
     z = np.concatenate([Zdm, Zstar, Zgas, Zbh])*u.Mpc # now in Mpc
-    #  print("QUESTION: do we have to convert also the mass by h") -> I think we have to
     m = np.concatenate([Mdm, Mstar, Mgas, Mbh])*u.Msun
-
-    """
-    # From https://academic.oup.com/mnras/article/470/1/771/3807086
-    # I think that 
-    # 1) smoothing make sense for hydrodym, maybe less so for lens modelling
-    # 2) we could test how important it is:
-    #    - w/o smoothing (all point particles)
-    #    - w. smoothing: - Gaussian
-    #                    - isoth-sphere
-    SmoothStar = Gal.stars["smooth"]  # in Mpc/h
-    SmoothGas  = Gal.gas["smooth"]    # in Mpc/h
-    SmoothDM   = np.zeros_like(Mdm)   # in Mpc/h -> no smoothing for DM
-    SmoothBH   = Gal.bh["smooth"]     # in Mpc/h
-    smooth     = np.concatenate([SmoothDM,SmoothStar,SmoothGas,SmoothBH])
-    """
-
     # center around the center of the galaxy
-    # correct from cMpc/h to Mpc/h
-    # then from Mpc/h to Mpc
-    Cx,Cy,Cz= Gal.centre*u.Mpc/(Gal.xy_propr2comov) # this should be now in Mpc
-    
+    # center of mass is given in Comiving coord 
+    # see https://arxiv.org/pdf/1510.01320 D.23 
+    # ->  it's given in cMpc (not cMpc/h) fsr
+    Cx,Cy,Cz = Gal.centre*u.Mpc/(Gal.xy_propr2comov) # (now) Mpc
+    x -= Cx
+    y -= Cy
+    z -= Cz
     # projection along given indexes
     # xy : ind=0
     # xz : ind=1
@@ -92,75 +79,58 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
         Cx = copy(Cy)
         y  = copy(z)
         Cz = copy(Cz)
-    x -=Cx
-    y -=Cy
+
 
     print("DEBUG\n",type(x))
 
     x = np.asarray(x.to("kpc"))
     y = np.asarray(y.to("kpc"))
-    m = np.asarray(m.to("solMass")/1e8, dtype=float) #unit of 10^12 solar masses
+    m = np.asarray(m.to("solMass"), dtype=float) 
+    
 
-    print("DEBUG")
-    fig, ax = plt.subplots(3)
-    ax[0].hist(x)
-    ax[0].set_xlabel("X [kpc]")
-    ax[1].hist(y)
-    ax[1].set_xlabel("Y [kpc]")
-    ax[2].hist(m)
-    ax[2].set_xlabel("M [1e8 SolMass]")
-    #namefig = f"{Gal.proj_dir}/hist1D_{proj_index}.png"
-    namefig = f"./tmp/cmi_hist1D_{proj_index}.png"
-    plt.savefig(namefig)
-    plt.close()
-    print("Saved "+namefig)
-
+    radius = 70 #kpc 
+    print("NOTE: taking a small radius -",radius,"kpc")
     # Redshift: 
     z_lens = Gal.z
     if verbose:
         print("z_lens",z_lens)
     cosmo   = FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
-    if verbose:
-        print("<Xs>",np.mean(x))
-        print("tot mass",np.sum(m))
-    
-    #x,y = x.to("kpc").value,y.to("kpc").value
-    radius    = get_radius(x,y,sigmas=4) #kpc
-    """
-    xmin = Cx.to("kpc").value-radius
-    ymin = Cy.to("kpc").value-radius
-    xmax = Cx.to("kpc").value+radius
-    ymax = Cy.to("kpc").value+radius
-    """
-    # I think the following is wrong: it should be centered around 0 bc X,Y already recentered
-    xmin = - radius
-    ymin = - radius
-    xmax = + radius
-    ymax = + radius
+
+    # X,Y already recentered around 0
+    xmin = -radius
+    ymin = -radius
+    xmax = +radius
+    ymax = +radius
 
     # numpy.histogram2d returns H with shape (nx_bins, ny_bins) where H[i,j]
     # counts x-bin i and y-bin j. We transpose to (ny, nx) so rows are y.
-    nx,ny = int(pixel_num.imag),int(pixel_num.imag)
     H, xedges, yedges = np.histogram2d(x, y, bins=[nx, ny],
                                        range=[[xmin, xmax], [ymin, ymax]],
-                                       weights=m)
+                                       weights=m,density=False)  
+    #                           if density=True, it normalises it to the total density
+    
+    # H is then the distribution of mass for each bin, not the density
+    mass_grid = H.T.copy() # Solar Masses
     # H shape: (nx, ny) -> transpose to (ny, nx)
-    mass_grid = H.T.copy()
-    print("radius [kpc]",radius)
 
-    dx      = (xmax - xmin) / nx
-    dy      = (ymax - ymin) / ny
+    # area of the (dx/dy) bins:
+    dx = (xmax - xmin) / nx #kpc
+    dy = (ymax - ymin) / ny #kpc
+    # density_ij = M_ij/(Area_bin_ij)
     density = mass_grid / (dx * dy)
-    print("dx,dy",dx,dy)
-    print("area",dx*dy,"kpc^2")
-    print("<mass>",np.mean(mass_grid))
-    print("<density>",np.mean(density))
+
+    if verbose:
+        print("dx,dy",dx,dy)
+        print("area",dx*dy,"kpc^2")
+        print("<mass>",np.mean(mass_grid))
+        print("<density>",np.mean(density))
 
 
     extent = [xmin,xmax,ymin,ymax]
     plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
+    #plt.contour(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
     levels = np.logspace(-4,-1)
-    #plt.contour(np.log10(density),extent=extent,levels=levels,norm="log")
+    plt.contour(np.log10(density),extent=extent,levels=levels,norm="log")
     plt.colorbar()
     plt.xlim([xmin,xmax])
     plt.ylim([ymin,ymax])

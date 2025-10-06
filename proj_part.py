@@ -82,7 +82,8 @@ def get_radius(RAs,DECs,sigmas=6):
     # we take 6 <sigmas> of 
     rad_min = sigmas*(np.std(RAs)+np.std(DECs))/2
     return np.min([rad_max,rad_min])
-    
+
+
 def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose):
     # the lens has to be supercritical
     # dens>Sigma_crit = (c^2/4PiG D_d(z_lens) ) D_s(z_source)/D_ds(z_lens,z_source)

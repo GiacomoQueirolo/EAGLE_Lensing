@@ -106,11 +106,14 @@ def get_files(sim,z=None,snap=None,_i_="*"):
     
     fix  = f"{snap}_z{zstr}p{pstring}/snap_{snap}_z{zstr}"
     file_string = prefix+fix+suffix
-    #print("#DEBUG")
-    #print(file_string)
     files = glob.glob(file_string)
     # checking that the files are not empty
-    assert files != []
+    try:
+        assert files != []
+    except:
+        print("#DEBUG")
+        print(file_string)
+        print("If snap==17, might be bc that snap was not downloaded fsr - and we fail to do so")
     return files
 
 
@@ -140,6 +143,11 @@ def read_snap_header_simple(z=None,snap=None,sim=std_sim):
     """
     return a,h,boxsize
 
+def _count_part(part):
+    return len(part["mass"])
+
+def _mass_part(part):
+    return np.sum(part["mass"])
 
 
 def get_gal_path(Gal,ret_snap_dir=False):
@@ -152,3 +160,51 @@ def get_gal_path(Gal,ret_snap_dir=False):
         return gal_path,gal_snap_dir
     return gal_path
 
+################################
+def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0,pa=0,q=1):
+    # x,y : N,M grid of coordinates
+    # n : Sersic index
+    # I : amplitude
+    # cntx,cnty : center coordinates
+    # pa: pointing angle
+    # q : axis ratio
+    try:
+        # ugly but useful
+        x=x.value
+        y=y.value
+    except:
+        pass
+    try:
+        # ugly but useful
+        cntx=cntx.value
+        cnty=cnty.value
+    except:
+        pass
+    if q==1:
+        # for some reason pa has effects even if q is 1 
+        pa=0
+    paRad = pa*np.pi/180
+    # rotate the galaxy by the angle paRad
+    x = np.cos(paRad)*(x-cntx)+np.sin(paRad)*(y-cnty)
+    y = -np.sin(paRad)*(x-cntx)+np.cos(paRad)*(y-cnty)
+    # include elliptical isophotes
+    #r = np.sqrt(x**2+y**2) #-> if q==1
+    xt2difq2 = y/(q*q)
+    r = np.sqrt(x**2+y*xt2difq2)
+    # brightness at distance r
+    bn = 1.992*n - 0.3271
+    re = 5.0
+    brightness = I*np.exp(-bn*((r/re)**(1.0/n)-1.0))
+    return brightness
+    
+class Sersic():
+    # useful to lens an image:
+    def __init__(self,I=10,cntx=0,cnty=0,pa=0,q=1,n=4):
+        self.cntx = cntx
+        self.cnty = cnty
+        self.pa   = pa
+        self.q    = q
+        self.n    = n
+        self.I    = I
+    def image(self,x,y):
+        return sersic_brightness(x,y,**self.__dict__)
