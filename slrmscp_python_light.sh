@@ -2,14 +2,14 @@
 
 # SLURM options:
 
-#SBATCH --job-name=SrtbutHv_job
-#SBATCH --output=srtBhv_pythjob-%j.out
+#SBATCH --job-name=Srt&Lgt_job
+#SBATCH --output=srtLgt_pythjob-%j.out
 #SBATCH --partition=htc_highmem      # Partition choice (htc by default)
 
 #SBATCH --ntasks=1                   # Run a single task
 #SBATCH --cpus-per-task=1 #prev:8
 #SBATCH --mem-per-cpu=32G #prev:4    # Memory in MB per default
-#SBATCH --time=1:00:00               # Max time limit = 7 days
+#SBATCH --time=3:00:00               # Max time limit = 7 days
 
 #SBATCH --mail-user=giacomo.queirolo@umontpellier.fr          # Where to send the e-mail
 #SBATCH --mail-type=NONE          # Mail events (NONE, BEGIN, END, FAIL, ALL)
