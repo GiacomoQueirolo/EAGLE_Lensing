@@ -26,7 +26,7 @@ from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
 
 
-from NG_proj_part_hist import z_source_max,pixel_num
+from NG_proj_part_hist import z_source_max,pixel_num,prep_Gal
 #z_source_max = 5
 #pixel_num    = 150j
 verbose      = True
@@ -38,6 +38,8 @@ from remade_gal import get_z_source,get_dP #get_radius
 
         
 def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,save_res=True,plot=True):
+    nx,ny = int(pixel_num.imag),int(pixel_num.imag)
+
     # given a projection, plot the density map
     
     Xstar,Ystar,Zstar = Gal.stars["coords"].T # in Mpc/h
@@ -127,11 +129,11 @@ def plot_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_sourc
 
 
     extent = [xmin,xmax,ymin,ymax]
-    plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
-    #plt.contour(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
+    #plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log",alpha=.5)
+    plt.contour(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log")
     levels = np.logspace(-4,-1)
-    plt.contour(np.log10(density),extent=extent,levels=levels,norm="log")
-    plt.colorbar()
+    #plt.contour(np.log10(density),extent=extent,levels=levels,norm="log",cmap=plt.cm.gist_earth_r)
+    plt.contour(np.log10(density),extent=extent,cmap=plt.cm.inferno)
     plt.xlim([xmin,xmax])
     plt.ylim([ymin,ymax])
     #namefig = f"{Gal.proj_dir}/densmap_proj_{proj_index}.png"
@@ -159,34 +161,8 @@ if __name__=="__main__":
     verbose       = True#args.verbose
     z_source_max  = args.z_source_max
 
-    """
-    if rerun:
-        Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
-        Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
-        mkdir(Gal.proj_dir)
-        Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
-    else:
-        # find an already "random" galaxy
-        dens_res_path = glob.glob(gal_dir+"/snap_*/"+dir_name+"_*/dens_res.pkl")
-        dens_res = np.random.choice(dens_res_path)
-        class empty_class():
-            def __init__(self):
-                return None
-        Gal = empty_class()
-        Gal.dens_res = dens_res
-        Gal.proj_dir = get_dir_basename(dens_res)[0]
-        
-    if verbose:
-        print("Assumptions: We are considering the maximum source redshift to be ",z_source_max)
-        if int(pixel_num.imag)<500:
-            print("Warning: running test")
-        elif int(pixel_num.imag)>=1000:
-            print("Warning: running very long")
-    """
     Gal = get_rnd_NG()
-    Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
-    mkdir(Gal.proj_dir)
-    Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
+    Gal = prep_Gal(Gal)
     plot_dens_map_hist(Gal=Gal,pixel_num=pixel_num, z_source_max=z_source_max,verbose=verbose)
     
     print("Success")

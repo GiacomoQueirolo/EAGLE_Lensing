@@ -8,42 +8,44 @@ import numpy as np
 from copy import copy
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser 
+import scipy
 from scipy.stats import gaussian_kde
 
 from astropy import units as u
 from astropy import constants as const
-from astropy.cosmology import FlatLambdaCDM
+
 from lenstronomy.LensModel import convergence_integrals
 
-# from lenstronomy.Util import util
 from remade_gal import get_rnd_NG
 from remade_gal import get_z_source,get_dP #,get_radius
 #from get_gal_indexes import get_rnd_gal
 
 from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
+from python_tools.conversion import e1e2_from_qphi
 
-
-z_source_max = 5
-pixel_num    = 200j
+#from fnct import Sersic
+from lenstronomy.LightModel.Profiles.sersic import SersicElliptic
+z_source_max = 4
+pixel_num    = 600j #200j
 verbose      = True
 plot_dnsmap  = True
+def_radius   = 100*u.kpc #70*u.kpc
 
-dir_name     = "proj_part_hist"
-
-def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,plot=plot_dnsmap):
+from project_gal import dir_name, prep_Gal_denspath
+def get_dens_map_rotate_hist(Gal,radius=def_radius,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,plot=plot_dnsmap):
     # try all projection in order to obtain a lens
     proj_index = 0
     """
     #DEBUG
-    res = None
     res = get_dens_map_hist(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
                                     z_source_max=z_source_max,verbose=verbose,plot=plot)
     raise RuntimeError("DEBUG--Arrived here")
     """
+    kw_res = None
     while proj_index<3:
         try:
-            res = get_dens_map_hist(Gal=Gal,proj_index=proj_index,pixel_num=pixel_num,
+            kw_res = get_dens_map_hist(Gal=Gal,radius=radius,proj_index=proj_index,pixel_num=pixel_num,
                                     z_source_max=z_source_max,verbose=verbose)
             break
         except AttributeError as Ae:
@@ -52,12 +54,12 @@ def get_dens_map_rotate_hist(Gal,pixel_num=pixel_num,z_source_max=z_source_max,v
             # should only be if the minimum z_source is higher than the maximum z_source
             # try with other proj
             proj_index+=1
-    if res is None:
+    if kw_res is None:
         raise RuntimeError("There is no projection of the galaxy that create a lens given the z_source_max")
     else:
-        return res
+        return kw_res
 
-def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,save_res=True,plot=True,DEBUG=False):
+def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,save_res=True,plot=True,radius=def_radius,DEBUG=False):
     nx,ny = int(pixel_num.imag),int(pixel_num.imag)
 
     # given a projection, produce the density map
@@ -152,14 +154,18 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     x  = np.asarray(x.to("kpc").value) #kpc
     y  = np.asarray(y.to("kpc").value) #kpc
     m  = np.asarray(m.to("solMass").value, dtype=float)  # M_sol
-    #radius = get_radius(x,y)               #kpc
-    radius = 70 #kpc 
-    print("NOTE: taking a small radius -",radius,"kpc")
+    #radius = def_radius #kpc 
+    if radius==def_radius:
+        print("NOTE: taking a small radius -",radius)
+    elif radius is None:
+        raise RuntimeError("TODO: implement")
+        radius = get_radius(x,y) #kpc
+        
     # Redshift: 
     z_lens = Gal.z
     if verbose:
         print("z_lens",z_lens)
-    cosmo   = FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
+    cosmo = Gal.cosmo
     if DEBUG:
         print("DEBUG")
         print("cosmo",cosmo)
@@ -168,14 +174,14 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     if DEBUG:
         print("<X> [kpc]",np.round(np.mean(x),3))
         print("<Y> [kpc]",np.round(np.mean(y),3))
-        print("radius [kpc]",np.round(radius,3))
+        print("radius ",np.round(radius,3))
         print("tot mass [1e8 M_sol]",np.round(np.sum(m)/1e8,3))
         
     # X,Y already recentered around 0
-    xmin = -radius
-    ymin = -radius
-    xmax = +radius
-    ymax = +radius
+    xmin = -radius.value
+    ymin = -radius.value
+    xmax = +radius.value
+    ymax = +radius.value
 
     if DEBUG:    
         print("DEBUG")
@@ -206,26 +212,42 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     # H shape: (nx, ny) -> transpose to (ny, nx)
 
     # area of the (dx/dy) bins:
-    dx = (xmax - xmin) / nx #kpc
-    dy = (ymax - ymin) / ny #kpc
+    dx = np.diff(xedges) #kpc #==(xmax - xmin) / nx 
+    dy = np.diff(yedges) #kpc
     # density_ij = M_ij/(Area_bin_ij)
     density = mass_grid / (dx * dy)
-
     if plot:
-        extent = [xmin,xmax,ymin,ymax]
-        plt.imshow(np.log10(density),extent=extent, cmap=plt.cm.gist_earth_r,norm="log",label="Density [Msun/kpc^2]")
-        plt.colorbar()
-        #plt.scatter(x,y,c="w",marker=".")
-        plt.xlim([xmin,xmax])
-        plt.ylim([ymin,ymax])
-        #
-        if DEBUG:
-            namefig = f"tmp/NG_proj_hist_densmap_{proj_index}.png"
-        else:
-            namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"
-        plt.savefig(namefig)
-        plt.close()
-        print("Saved "+namefig)
+
+        # DEBUG
+        try:
+            log10_dens = np.log10(density)
+            extent = [xmin,xmax,ymin,ymax]
+            if np.isneginf(log10_dens).any():
+                print("log10(dens) has -inf")
+                log10_dens[np.where(np.isneginf(log10_dens))[0]]= -1e4
+            plt.imshow(log10_dens,extent=extent, cmap=plt.cm.gist_earth_r,norm="log",label="Density [Msun/kpc^2]")
+            plt.colorbar()
+            #plt.scatter(x,y,c="w",marker=".")
+            plt.xlim([xmin,xmax])
+            plt.ylim([ymin,ymax])
+            #
+            if DEBUG:
+                namefig = f"tmp/NG_proj_hist_densmap_{proj_index}.png"
+            else:
+                namefig = f"{Gal.proj_dir}/hist_densmap_proj_{proj_index}.png"
+            plt.savefig(namefig)
+            plt.close()
+            print("Saved "+namefig)
+        except ValueError as e:
+                
+            print("Failed plot due to error "+str(e))
+            print("extent",extent)
+            
+            tmp_name = "tmp/log10dens_del.pkl"
+            print("Saving log10_dens in "+tmp_name)
+            with open(tmp_name,"wb") as f:
+                pickle.dump(log10_dens,f)
+
     # define the z_source:
     # dens now is already in Msun/kpc^2
     """
@@ -251,37 +273,42 @@ def get_dens_map_hist(Gal,proj_index=0,pixel_num=pixel_num,z_source_max=z_source
     # dP to convert from kpc/pix to ''/pix
     dP = get_dP(radius*u.kpc,pixel_num,cosmo=cosmo,Gal=Gal) # ''/pix -> to double check that this is correct
     # store the results
-    res = [dens_Ms_kpc2,radius,dP,[dx,dy],z_source,cosmo]
+    #res = [dens_Ms_kpc2,radius,dP,[dx,dy],z_source,cosmo,proj_index]
+    kw_res = {"dens_Ms_kpc2":dens_Ms_kpc2,
+              "radius":radius,
+              "dP":dP,
+              "dx":dx,
+              "dy":dy,
+              "z_source":z_source,
+              "z_lens":z_lens,
+              "pixel_num":pixel_num,
+              "cosmo":cosmo,
+              "proj_index":proj_index}
     if save_res:
         with open(Gal.dens_res,"wb") as f:
-            pickle.dump(res,f)
+            pickle.dump(kw_res,f)
         print("Saved "+Gal.dens_res)
-    return res
-
-from fnct import Sersic
+    return kw_res
 
 
-def prep_Gal(Gal,dir_name=dir_name):
-    # impractical but easy to set up
-    Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
-    mkdir(Gal.proj_dir)
-    Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
-    return Gal
+
 
 if __name__=="__main__":
     parser = ArgumentParser(description="Project particles into a mass sheet - histogram version")
     parser.add_argument("-dn","--dir_name",dest="dir_name",type=str, help="Directory name",default=dir_name)
     parser.add_argument("-pxn","--pixel_num",dest="pixel_num",type=int, help="Pixel number",default=pixel_num.imag)
+    parser.add_argument("-r","--radius",dest="radius",type=int, help="Cutout radius [kpc]",default=def_radius.value)
     parser.add_argument("-zsm","--z_source_max",dest="z_source_max",type=float, help="Maximum source redshift",default=z_source_max)
-    parser.add_argument("-nrr", "--not_rerun", dest="rerun", 
-                        default=True,action="store_false",help="if True, rerun code")
+    #parser.add_argument("-nrr", "--not_rerun", dest="rerun", 
+    #                    default=True,action="store_false",help="if True, rerun code")
     parser.add_argument("-pl", "--plot", dest="plot", 
                         default=False,action="store_true",help="Plot dens map")
     parser.add_argument("-v", "--verbose", dest="verbose", 
                         default=False,action="store_true",help="verbose")
     args          = parser.parse_args()
     pixel_num     = args.pixel_num*1j
-    rerun         = args.rerun
+    radius        = args.radius*u.kpc
+    #rerun         = args.rerun
     dir_name      = args.dir_name
     verbose       = args.verbose
     z_source_max  = args.z_source_max
@@ -305,7 +332,7 @@ if __name__=="__main__":
         Gal.dens_res = dens_res
         Gal.proj_dir = get_dir_basename(dens_res)[0]
     """    
-    Gal = get_rnd_NG()
+    Gal    = get_rnd_NG()
     z_lens = Gal.z
     """
     print("DEBUG")
@@ -330,16 +357,27 @@ if __name__=="__main__":
     print("Saved "+namefig) 
     print("DEBUG")
     """
-    Gal = prep_Gal(Gal)
+    print("pixel_num:",pixel_num)
+    print("cutout radius:",radius)
+    print("Gal:",str(Gal))
+    Gal = prep_Gal_denspath(Gal)
     if verbose:
         print("Assumptions: We are considering the maximum source redshift to be ",z_source_max)
         if int(pixel_num.imag)<500:
             print("Warning: running test")
         elif int(pixel_num.imag)>=1000:
             print("Warning: running very long")
-    dens_Ms_kpc2,radius,dP,dxdy,z_source,cosmo = get_dens_map_rotate_hist(Gal=Gal,pixel_num=pixel_num,
-                                                    z_source_max=z_source_max,verbose=True)#plot=plot,verbose=verbose)
-    dx,dy = dxdy
+    kw_res = get_dens_map_rotate_hist(Gal=Gal,pixel_num=pixel_num,
+                                      z_source_max=z_source_max,
+                                      verbose=True,radius=radius)#plot=plot,verbose=verbose)
+    dens_Ms_kpc2 = kw_res["dens_Ms_kpc2"]
+    radius       = kw_res["radius"]
+    dP           = kw_res["dP"]
+    dx           = kw_res["dx"]
+    dy           = kw_res["dy"]
+    z_source     = kw_res["z_source"]
+    cosmo        = kw_res["cosmo"]
+    proj_index   = kw_res["proj_index"]
     """
     try:
         if rerun:
@@ -355,7 +393,7 @@ if __name__=="__main__":
         dens_Ms_kpc2,radius,dP,cosmo = get_dens_map_rotate_hist(Gal=Gal,pixel_num=pixel_num,
                                                            z_source_max=z_source_max,verbose=True,plot=plot)#verbose=verbose)
     """
-    Xg, Yg    = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num] # kpc
+    Xg, Yg    = np.mgrid[-radius:radius:pixel_num, -radius:radius:pixel_num]*u.kpc
     arcXkpc   = cosmo.arcsec_per_kpc_proper(z_lens) # ''/kpc
     
     # create lensed image:
@@ -414,8 +452,8 @@ if __name__=="__main__":
     #if DEBUG:
     #    print("DEBUG: shape Xg,num_aRa",np.shape(Xg),np.shape(num_aRa))
 
-    ra  = Xg.reshape(num_aRa.shape)*arcXkpc/u.pix  # not entirely sure this unit is correct, but anyway it's just book-keeping
-    dec = Yg.reshape(num_aDec.shape)*arcXkpc/u.pix  
+    ra  = Xg*arcXkpc #arcsec
+    dec = Yg*arcXkpc #arcsec
     """
     print("DEBUG")
     plt.imshow(ra.value)
@@ -468,12 +506,25 @@ if __name__=="__main__":
     plt.close()
     print("Saving "+im_name)
     """
+    """
     # define the source to be behind the most dense pixel (not necessarily==CMS)
     # -> could consider not exactly behind but at least within a small radius of it    
     # find the "center" of the galaxy -> most dens pixel
-    index_maxk = np.where(kappa_grid==np.max(kappa_grid))
-    cntx_meas  = -((index_maxk[1]+.5) -int((len(kappa_grid[1]))/2.))*dx
-    cnty_meas  = -((index_maxk[0]+.5) -int((len(kappa_grid))/2.))*dy
+    #index_maxk = np.where(kappa_grid==np.max(kappa_grid))
+    # this could find a single high pixel -> take the average of n pixels to "smooth it out"
+    # and find the real centre (although with lower res -> we don't care for a few pixels of difference)
+    #   first: find the smallest rescale factor that is a multiple of the size of the image
+    rescale_factor = [i  for i in np.range(5,15) if len(kappa_grid)%i==0 and len(kappa_grid[0])%i==0]
+    assert len(rescale_factor)!=0
+    rescale_factor = rescale_factor[0]
+    rescaled_kappa = scipy.ndimage.zoom(kappa_grid, 1./rescale_factor, order=3)
+    index_max_rescaled_kappa = np.where(rescaled_kappa==np.max(rescaled_kappa))
+    index_maxk = [(index_max_rescaled_kappa[0]+.5)*rescale_factor,(index_max_rescaled_kappa[1]+.5)*rescale_factor]
+
+    print("dx,dy",dx,dy)
+    print("shape kappa",np.shape(kappa_grid))
+    cntx_meas  = -(index_maxk[0] -int((len(kappa_grid))/2.))*dx
+    cnty_meas  = -(index_maxk[1] -int((len(kappa_grid[0]))/2.))*dy
     cntx_meas  = cntx_meas[0]
     cnty_meas  = cnty_meas[0]
     
@@ -482,42 +533,111 @@ if __name__=="__main__":
     print("Center measured")
     print(cntx_meas,cnty_meas,"[kpc]")
     print(cntx_meas_arcsec,cnty_meas_arcsec,"['']")
-    
+    #print("WARNING - INVERTING X AND Y FOR THE SOURCE")
 
-    print("WARNING - INVERTING X AND Y FOR THE SOURCE")
-    source = Sersic(I=10,cnty=cntx_meas_arcsec,cntx=cnty_meas_arcsec,pa=45,q=.65,n=4)
-    fg,ax=plt.subplots(2,3,figsize=(16,8))
-    #ax[0][0].imshow(ra.value)
-    #ax[0][0].set_title("Ra source")
-    #ax[0][1].imshow(dec.value)
-    #ax[0][1].set_title("Dec source")
-    #ax[0][0].imshow(np.log10(Gal.image),extent=[np.min(ra),np.max(ra),np.min(dec),np.max(dec)])
-    #ax[0][0].set_title(r"Particle Distrib.")
-    ax[0][1].imshow(np.log10(kappa_grid))
-    ax[0][1].scatter(cnty_meas,cntx_meas,marker="x",c="r",label="x,y meas:"+str(cnty_meas)+","+str(cntx_meas))
-    ax[0][1].set_title(r"log $\kappa$")
-    ax[0][1].imshow(np.log10(kappa_grid))
-    ax[0][1].set_title(r"log $\kappa$")
-    Src = np.log10(source.image(ra,dec)) 
-    ax[0][2].imshow(Src)
-    ax[0][2].contour(Src,c="w")
-    ax[0][2].set_title("log Source")
-    ax[1][0].imshow(num_aRa.value)
-    ax[1][0].set_title("Ra deflection")
-    ax[1][1].imshow(num_aDec.value)
-    ax[1][1].set_title("Dec deflection")
+    #source = Sersic(I=10,cnty=cnty_meas_arcsec,cntx=cntx_meas_arcsec,pa=45,q=.65,n=4)
+    """ # all this was highly biased
+    # find CM again: -> kappa grid is density off by a constant, cancelled out by the normalisation
+    ra_cm  = np.sum(ra* kappa_grid)/np.sum(kappa_grid)
+    dec_cm = np.sum(dec* kappa_grid)/np.sum(kappa_grid)
+    #source = Sersic(I=10,cntx=ra_cm,cnty=dec_cm,pa=45,q=.65,n=4)
+    source  = SersicElliptic()
+    e1,e2   = e1e2_from_qphi(q=.65,phi=45)
+    
+    #index_maxk = np.abs(ra_cm-ra).argmin(axis=0)[0],np.abs(dec_cm-dec).argmin(axis=1)[0]
+    index_cmsk = np.abs(ra_cm-ra[:,0]).argmin(),np.abs(dec_cm-dec[0]).argmin()
+    # consider instead the maxima as center for the source
+    ira_max,idec_max = np.where(kappa_grid==np.max(kappa_grid))
+    ira_max = ira_max[0]
+    idec_max = idec_max[0]
+    ra_max  = ra[ira_max][idec_max]
+    dec_max = dec[ira_max][idec_max]
+
+    fg,axes    = plt.subplots(2,3,figsize=(16,8))
+    rad_arcsec = radius*arcXkpc
+    rad_arcsec = rad_arcsec.value
+    extent_arcs = [-rad_arcsec,rad_arcsec,-rad_arcsec,rad_arcsec] #arcsec
+    extent_kpc  = [-radius.value,radius.value,-radius.value,radius.value] #kpc
+    
+    ax  = axes[0][0]
+    im0 = ax.imshow(np.log10(kappa_grid.value),origin="lower",extent=extent_kpc)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    fg.colorbar(im0, cax=cax, orientation='vertical')
+    ax.contour(kappa_grid.value,cmap=plt.cm.inferno,alpha=.8,extent=extent_kpc)
+    #ax.scatter(index_cmsk[1],index_cmsk[0],marker="x",c="r",label="CMS")
+    #ax.scatter(idec_max,ira_max,marker="x",c="g",label=r"Max($\kappa$)")
+    ax.scatter(dec_cm/arcXkpc,ra_cm/arcXkpc,marker="x",c="b",label="CMS")
+    ax.scatter(dec_max/arcXkpc,ra_max/arcXkpc,marker="x",c="g",label=r"Max($\kappa$)")
+    ax.set_xlim(extent_kpc[0],extent_kpc[1])
+    ax.set_ylim(extent_kpc[2],extent_kpc[3])
+    ax.set_title(r"log $\kappa$")
+    ax.legend()
+
+    ax  = axes[0][1]
+    im0 = ax.imshow(np.log10(kappa_grid.value),origin="lower",extent=extent_arcs,)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    fg.colorbar(im0, cax=cax, orientation='vertical')
+    ax.contour(kappa_grid.value,cmap=plt.cm.inferno,extent=extent_arcs)
+    #ax.scatter(index_cmsk[0],index_cmsk[1],marker="x",c="r",label="CMS")
+    ax.scatter(dec_cm,ra_cm,marker="x",c="b",label="CMS arcsec")
+    ax.scatter(dec_max,ra_max,marker="x",c="g",label=r"Max($\kappa$) arcsec")
+    ax.set_xlim(extent_arcs[0],extent_arcs[1])
+    ax.set_ylim(extent_arcs[2],extent_arcs[3])
+    ax.set_title(r"log $\kappa$ (arcsec)")
+    ax.legend()
+    
+    #ax.axis("off")
+    #Src = np.log10(source.image(ra,dec)) 
+    se_image = source.function(x=ra.value,y=dec.value,center_x=ra_max.value,
+                               center_y=dec_max.value, e1=e1,e2=e2,amp=10,n_sersic=4,R_sersic=5)
+    Src = np.log10(se_image)
+    ax = axes[0][2]
+    im0 = ax.imshow(Src,extent=extent_arcs,origin="lower")
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    fg.colorbar(im0, cax=cax, orientation='vertical')
+    ax.contour(Src,cmap=plt.cm.gist_earth_r,extent=extent_arcs)
+    ax.set_title("Log Source")
+    #ax.scatter(index_maxk[1],index_maxk[0],marker="x",c="r",label="x,y meas:"+str(index_maxk[0])+","+str(index_maxk[1]))
+
+    ax  = axes[1][0]
+    im0 = ax.imshow(num_aRa.value,extent=extent_arcs,origin="lower")
+    ax.set_title("Ra deflection")
+    ax  = axes[1][1]
+    ax.imshow(num_aDec.value,extent=extent_arcs,origin="lower")
+    ax.set_title("Dec deflection")
     ra_im  = ra.value-num_aRa.value
     dec_im = dec.value-num_aDec.value
-    lensed_im =  source.image(ra_im,dec_im)
+    #lensed_im =  source.image(ra_im,dec_im)
+    lensed_im = source.function(x=ra_im,y=dec_im,center_x=ra_max.value,
+                                center_y=dec_max.value,e1=e1,e2=e2,amp=10,n_sersic=4,R_sersic=5)
     Lsnd      = np.log10(lensed_im)
-    ax[1][2].imshow(Lsnd)
-    ax[1][2].contour(Lsnd,c="w")
-    ax[1][2].set_title("Log Lensed Sersic image")
+    ax = axes[1][2]
+    ax.imshow(Lsnd,extent=extent_arcs,origin="lower")
+    ax.contour(Lsnd,cmap=plt.cm.gist_earth_r,extent=extent_arcs)
+    ax.set_title("Log Lensed Sersic image")
+
+    for i,axi in enumerate(axes):
+        for j,axij in enumerate(axi):
+            if i==0 and j==0:
+                axij.set_xlabel('X [kpc]')
+                axij.set_ylabel('Y [kpc]')
+            else:
+                axij.set_xlabel('RA ["]')
+                axij.set_ylabel('DEC ["]')
+            
     im_name = f"tmp/lensed_im.pdf"
     # just to be sure
-    os.remove(im_name)
+    try:
+        os.remove(im_name)
+    except:
+        pass
+    
+    plt.tight_layout()
+    plt.suptitle("Gal z="+str(Gal.z))
     plt.savefig(im_name)
-    plt.show()
     plt.close()
     print("Saving "+im_name)
 
@@ -526,3 +646,4 @@ if __name__=="__main__":
     #os.symlink(Gal.proj_dir[:-1],"./tmp/.")
     
     print("Success")
+    

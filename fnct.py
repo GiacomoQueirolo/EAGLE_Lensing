@@ -40,9 +40,12 @@ z_index = np.array([float(f) for f in list(kw_z_snap.keys())])
 ###################
 
 def get_z(snap):
-    snap = str(snap)
-    while snap[0]=="0" and snap!="0":
-        snap = snap[1:]
+    # strip all leading zeros
+    snap = str(snap).lstrip("0")
+    if snap=="":
+        snap="0"
+    #while snap[0]=="0" and snap!="0":
+    #    snap = snap[1:]
     return kw_snap_z[snap]
 
 def get_snap(z,_ln_snap=None):
@@ -63,6 +66,7 @@ def get_z_snap(z=None,snap=None):
     return z,snap
     
 def prepend_str(str_i,ln_str,fill="0"):
+    # should rather be done with f"{string:04}" or similar
     if ln_str is None:
         return str_i
     str_i = str(str_i)
@@ -161,7 +165,7 @@ def get_gal_path(Gal,ret_snap_dir=False):
     return gal_path
 
 ################################
-def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0,pa=0,q=1):
+def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0,pa=0,q=1,Re=5.0):
     # x,y : N,M grid of coordinates
     # n : Sersic index
     # I : amplitude
@@ -185,21 +189,21 @@ def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0,pa=0,q=1):
         pa=0
     paRad = pa*np.pi/180
     # rotate the galaxy by the angle paRad
-    x = np.cos(paRad)*(x-cntx)+np.sin(paRad)*(y-cnty)
-    y = -np.sin(paRad)*(x-cntx)+np.cos(paRad)*(y-cnty)
+    X = np.cos(paRad)*(x-cntx)+np.sin(paRad)*(y-cnty)
+    Y = -np.sin(paRad)*(x-cntx)+np.cos(paRad)*(y-cnty)
     # include elliptical isophotes
     #r = np.sqrt(x**2+y**2) #-> if q==1
-    xt2difq2 = y/(q*q)
-    r = np.sqrt(x**2+y*xt2difq2)
+    xt2difq2 = Y/(q*q)
+    r = np.sqrt(X**2+Y*xt2difq2)
     # brightness at distance r
     bn = 1.992*n - 0.3271
-    re = 5.0
-    brightness = I*np.exp(-bn*((r/re)**(1.0/n)-1.0))
+    brightness = I*np.exp(-bn*((r/Re)**(1.0/n)-1.0))
     return brightness
     
 class Sersic():
     # useful to lens an image:
     def __init__(self,I=10,cntx=0,cnty=0,pa=0,q=1,n=4):
+        raise RuntimeError("Something is off w. the centering when considering ellipticity. Use lenstronomy 'lenstronomy.LightModel.Profiles.sersic import SersicElliptic' for example")
         self.cntx = cntx
         self.cnty = cnty
         self.pa   = pa

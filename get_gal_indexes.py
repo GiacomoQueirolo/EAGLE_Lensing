@@ -35,7 +35,7 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl
     
     # NOTE: center of mass is in comoving coord.(cMpc)
     # Execute
-    print("DEBUG - check that the pickling doesn't mess w. the data")
+    #print("DEBUG - check that the pickling doesn't mess w. the data")
     check_prev = False
     save_pkl = False
     if check_prev:

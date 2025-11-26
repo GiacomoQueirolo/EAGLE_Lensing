@@ -481,51 +481,6 @@ def get_lens_dir(Gal):
 
 
 
-def Gal2MXYZ(Gal): 
-    # Given the galaxy, return Masses (in Msun) and
-    # XY coords. of particles in kpc  centered around center
-    
-    # Particle masses
-    Mstar = Gal.stars["mass"] # Msun
-    Mgas  = Gal.gas["mass"]   # Msun
-    Mdm   = Gal.dm["mass"]    # Msun
-    Mbh   = Gal.bh["mass"]    # Msun
-    Ms    = np.concatenate([Mstar,Mgas,Mdm,Mbh])*u.Msun #Msun
-
-    # Particle pos
-    Xstar,Ystar,Zstar =  np.transpose(Gal.stars["coords"]) # Mpc
-    Xgas,Ygas,Zgas    =  np.transpose(Gal.gas["coords"])   # Mpc
-    Xdm,Ydm,Zdm       =  np.transpose(Gal.dm["coords"])    # Mpc
-    Xbh,Ybh,Zbh       =  np.transpose(Gal.bh["coords"])    # Mpc
-    Xs = np.concatenate([Xstar,Xgas,Xdm,Xbh])*u.Mpc.to("kpc")*u.kpc #kpc
-    Ys = np.concatenate([Ystar,Ygas,Ydm,Ybh])*u.Mpc.to("kpc")*u.kpc #kpc
-    Zs = np.concatenate([Zstar,Zgas,Zdm,Zbh])*u.Mpc.to("kpc")*u.kpc #kpc
-    # center around the center of the galaxy
-    # center of mass is given in Comiving coord 
-    # see https://arxiv.org/pdf/1510.01320 D.23 
-    # ->  it's given in cMpc (not cMpc/h) fsr
-    Cx,Cy,Cz = Gal.centre*u.Mpc.to("kpc")*u.kpc/(Gal.xy_propr2comov) # (now) kpc 
-
-    
-    #print("Centered around the CM") # verified to be correct
-    Xs -= Cx
-    Ys -= Cy
-    Zs -= Cz
-    return Ms, Xs,Ys,Zs
-
-def Gal2kwMXYZ(Gal): 
-    Ms, Xs,Ys,Zs = Gal2MXYZ(Gal)
-    return {"Ms":Ms,"Xs":Xs,"Ys":Ys,"Zs":Zs}
-    
-def get_CM(Ms,Xs,Ys,Zs=None):
-    X_cm = np.sum(Xs*Ms)/np.sum(Ms)
-    Y_cm = np.sum(Ys*Ms)/np.sum(Ms)
-    if Zs is None:
-        return X_cm,Y_cm
-    else:
-        Z_cm = np.sum(Zs*Ms)/np.sum(Ms)
-        return X_cm,Y_cm,Z_cm
-        
 # for debug:
 if __name__=="__main__":
     
