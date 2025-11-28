@@ -164,6 +164,42 @@ class NewGal:
         # only for DEBUGging you should set it false
         self._read_prev = True
         self.run(self._read_prev)
+
+    ### Class Structure ####
+    ########################
+    def _identity(self):
+        # Returns tuple to identify uniquely this galaxy
+        Id = (self.sim,self.snap,self.Name)
+        return Id
+    
+    def __hash__(self):
+        # simplify the hash method
+        return hash(self._identity())
+
+    def __eq__(self, other):
+        if not isinstance(other, NewGal):
+            return NotImplemented
+        return self._identity() == other._identity()
+        
+    def __str__(self):
+        str_gal = f"Gal {self.Gn}.{self.SGn}"
+        str_gal += f", at z={str(np.round(self.z,3))}/snap={self.snap},"
+        str_gal += f" with \nN={'%.1E'%Decimal(self.N_tot_part)} part.\nof \ntot Mass={'%.1E'%Decimal(self.M_tot)} [M_sun]\n"
+        str_gal +=f" divided in N \n\
+                Stars:{'%.1E'%Decimal(self.N_stars)}\n\
+                Gas:{'%.1E'%Decimal(self.N_gas)}\n\
+                DM:{'%.1E'%Decimal(self.N_dm)}\n\
+                BH:{'%.1E'%Decimal(self.N_bh)}\n"
+        str_gal +=f"and Mass in \n\
+                    Stars:{'%.1E'%Decimal(self.M_stars)} [M_sun]\n\
+                    Gas:{'%.1E'%Decimal(self.M_gas)} [M_sun]\n\
+                    DM:{'%.1E'%Decimal(self.M_dm)} [M_sun]\n\
+                    BH:{'%.1E'%Decimal(self.M_bh)} [M_sun]\n"
+        return str_gal 
+    ########################
+    ########################
+    
+
     def run(self,_read_prev=True):
         upload_successful = False
         if _read_prev:
@@ -212,10 +248,12 @@ class NewGal:
         prev_Gal = ReadGal(self)
         if prev_Gal is False:
             return False
-        else:
-            for k in prev_Gal.__dict__.keys():
-                self.__dict__[k] = prev_Gal.__dict__[k]
+        # we have now a good way to define equality
+        if prev_Gal == self:
+            for attr, value in prev_Gal.__dict__.items():
+                setattr(self, attr, value)
             return True
+        return False
             
     
     def prop2comov(self,varType):
@@ -418,45 +456,12 @@ class NewGal:
             pickle.dump(self,f)
         print("Saved "+self.pkl_path)
         
-    def __str__(self):
-        str_gal = f"Gal {self.Gn}.{self.SGn}"
-        str_gal += f", at z={str(np.round(self.z,3))}/snap={self.snap},"
-        str_gal += f" with \nN={'%.1E'%Decimal(self.N_tot_part)} part.\nof \ntot Mass={'%.1E'%Decimal(self.M_tot)} [M_sun]\n"
-        str_gal +=f" divided in N \n\
-                Stars:{'%.1E'%Decimal(self.N_stars)}\n\
-                Gas:{'%.1E'%Decimal(self.N_gas)}\n\
-                DM:{'%.1E'%Decimal(self.N_dm)}\n\
-                BH:{'%.1E'%Decimal(self.N_bh)}\n"
-        str_gal +=f"and Mass in \n\
-                    Stars:{'%.1E'%Decimal(self.M_stars)} [M_sun]\n\
-                    Gas:{'%.1E'%Decimal(self.M_gas)} [M_sun]\n\
-                    DM:{'%.1E'%Decimal(self.M_dm)} [M_sun]\n\
-                    BH:{'%.1E'%Decimal(self.M_bh)} [M_sun]\n"
-        return str_gal
 
+        
 # this function is a wrapper for convenience - it takes the class itself as input
+from python_tools.get_res import LoadClass
 def ReadGal(GAL,vebose=True):
-    return LoadGal(path=GAL.pkl_path,verbose=verbose)
-
-def LoadGal(path,verbose=True):
-    if os.path.isfile(path):
-        print("File "+path+" is present")
-        try:
-            return _LoadGal(path,verbose)
-        except Exception as e:
-            print("But failed to load: "+str(e))
-            return False
-    else:
-        print("File not present")
-        return False
-
-
-def _LoadGal(path,verbose=True):
-    with open(path,"rb") as f:
-        GAL = pickle.load(f)
-    if verbose:
-        print(f"Loaded {GAL.pkl_path}")
-    return GAL
+    return LoadClass(path=GAL.pkl_path,verbose=verbose)
 
 def get_rnd_NG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
                pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):

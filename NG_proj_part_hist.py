@@ -32,7 +32,7 @@ verbose      = True
 plot_dnsmap  = True
 def_radius   = 100*u.kpc #70*u.kpc
 
-from project_gal import dir_name, prep_Gal_denspath
+from project_gal import dir_name, prep_Gal_projpath
 def get_dens_map_rotate_hist(Gal,radius=def_radius,pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose,plot=plot_dnsmap):
     # try all projection in order to obtain a lens
     proj_index = 0
@@ -360,7 +360,7 @@ if __name__=="__main__":
     print("pixel_num:",pixel_num)
     print("cutout radius:",radius)
     print("Gal:",str(Gal))
-    Gal = prep_Gal_denspath(Gal)
+    Gal = prep_Gal_projpath(Gal)
     if verbose:
         print("Assumptions: We are considering the maximum source redshift to be ",z_source_max)
         if int(pixel_num.imag)<500:

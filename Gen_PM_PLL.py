@@ -212,6 +212,32 @@ class PMLens():
         kwargs_lens_PART,lens_model_PART = self.get_lens_model(thetaEs=thetaEs,samples=samples,**kw_lns_mod)
         return kwargs_lens_PART,lens_model_PART
 
+    
+    ### Class Structure ####
+    ########################
+    def _identity(self):
+        # Returns tuple to identify uniquely this galaxy
+        # convert kwargs in immuatable tuple to be hashable
+        Id = (self.name,
+              tuple(sorted(self.kwargs_lens.items())))
+        return Id
+    
+    def __hash__(self):
+        # simplify the hash method
+        return hash(self._identity())
+
+    def __eq__(self, other):
+        if not isinstance(other, PMLens):
+            return NotImplemented
+        return self._identity() == other._identity()
+
+    def __str__(self):
+        if not getattr(self,"name",False):
+            self._setup_names()
+        return self.name
+    ########################
+    ########################
+"""
     def __eq__(self,other):
         if not hasattr(other,"name"):
             return False
@@ -225,7 +251,7 @@ class PMLens():
             if self.kwargs_lens[k]!=other.kwargs_lens[k]:
                 return False
         return True
-
+"""
 def get_LensSystem_kwrgs(deltaPix,pixel_num=pixel_num,background_rms=0.005,exp_time=500):
     # data specifics
     # background noise per pixel
@@ -267,7 +293,7 @@ from remade_gal import Gal2kwMXYZ
 from project_gal import prep_Gal_projpath,get_rough_radius,get_minzsource_proj,proj_parts
 
 
-class Lens_PART(): 
+class LensPart(): 
     def __init__(self,
                     Galaxy,
                     kwlens_part, # if PM or AS, and if so size of the core
@@ -281,9 +307,11 @@ class Lens_PART():
         Galaxy            = prep_Gal_projpath(Galaxy) # just set up some directories
         # setup of data
         self.Gal           = Galaxy
+        self.kwlens_part   = kwlens_part
         lens_dir           = get_lens_dir(self.Gal)
+        self.savedir_sim   = savedir_sim
         self.savedir       = f"{lens_dir}/{savedir_sim}"
-        self.reload        = reload  
+        self.reload        = reload
         self.pixel_num     = pixel_num      
         mkdir(self.savedir)
         # cosmo prms
@@ -304,6 +332,68 @@ class Lens_PART():
         # if AS: param:{"thetacAS"}
         self.PMLens      = PMLens(kwlens_part)
         self._setup_names()
+
+    ### Class Structure ####
+    ########################
+    def _identity(self):
+        # Returns tuple to identify uniquely this galaxy
+        Id = (self.Gal._identity(),
+              self.PMLens._identity(),
+              self.pixel_num,
+              self.z_source_max,self.cutoff_radius,
+              self.exp_time,self.bckg_rms)
+        return Id
+    
+    def __hash__(self):
+        # simplify the hash method
+        return hash(self._identity())
+
+    def __eq__(self, other):
+        if not isinstance(other, LensPart):
+            return NotImplemented
+        return self._identity() == other._identity()
+
+    def __str__(self):
+        if not getattr(self,"name",False):
+            self._setup_names()
+        return self.name
+        
+    def store(self):
+        if not hasattr(self,"pkl_path"):
+            self._setup_names()
+        # store this sim
+        # but not the most heavy parts (recovered with the unpack function)
+        self_copy = deepcopy(self)
+        # delete kwargs_lens_PART 
+        # -> can be recovered fast from the Gal with setup_lenses
+        del self_copy.kwargs_lens_PART
+        # delete imagenumerics heaviest component (fast to recover)
+        self_copy.imageModel.ImageNumerics._numerics_subframe._grid = None
+
+        with open(self.pkl_path,"wb") as f:
+            pickle.dump(self_copy,f)
+        print("Saved "+self.pkl_path)
+        
+    def unpack(self):
+        # this function recover the parts deleted before storing
+        # to save space
+        # recover the grid
+        gridClassType = getattr(self.kwargs_numerics,"compute_mode","regular")
+        if gridClassType =="regular":
+            from lenstronomy.ImSim.Numerics.grid import RegularGrid as Grid
+        elif gridClassType  == "adaptive":
+            from lenstronomy.ImSim.Numerics.grid import AdaptiveGrid as Grid
+        recomputed_grid = Grid(nx=self.pixel_num,ny=self.pixel_num,
+                        transform_pix2angle=self.imageModel.Data.transform_pix2angle,
+                        ra_at_xy_0=self.imageModel.Data.radec_at_xy_0[0],
+                        dec_at_xy_0=self.imageModel.Data.radec_at_xy_0[1])
+        self.imageModel.ImageNumerics._numerics_subframe._grid = recomputed_grid 
+        # recover also kwargs_lens_PART:
+        self.setup_lenses() 
+        return True
+    ########################
+    ########################
+
     def _get_name(self):
         # define name and path of savefile
         self.name       = f"{self.Gal.Name}_Npix{self.pixel_num}_Part{self.PMLens.name}"
@@ -316,36 +406,22 @@ class Lens_PART():
     def upload_prev(self):
         if not self.reload:
             return False
-        prev_mod = ReadClass(self)
+        prev_mod = ReadLens(self)
         if prev_mod is False:
             return False
-        else:
-            # verify that the inputs are the same:
-            for k in self.__dict__.keys():
-                # we don't care about this one
-                if k=="reload":
-                    continue
-
-                if prev_mod.__dict__[k]!=self.__dict__[k]:
-                    print("But the previous was not exactly the same:")
-                    print("Prev vs Current\n",k,":",prev_mod.__dict__[k],self.__dict__[k])
-                    print("\nRerunning...")
-                    return False
-            for k in prev_mod.__dict__.keys():
-                # we don't care about this one
-                if k=="reload":
-                    continue
-                self.__dict__[k] = prev_mod.__dict__[k]
+        # we have now a good way to define equality
+        if prev_mod==self:
+            for attr, value in prev_mod.__dict__.items():
+                setattr(self, attr, value)
             return True
-        
+        return False
+            
     def run(self,read_prev=True):
         upload_successful = False
         if read_prev:
             upload_successful = self.upload_prev()
         if not upload_successful:
-
             # Read particles ONLY ONCE
-
             kw_parts          = Gal2kwMXYZ(self.Gal) # kwargs of Msun,XYZ in kpc (explicitely) centered around Centre
 
             kwres_proj        = get_minzsource_proj(self.Gal,kw_parts,cutoff_radius=self.cutoff_radius,
@@ -404,6 +480,7 @@ class Lens_PART():
         self.kwargs_lens_PART  = kwLns_PART
         self.lens_model_PART   = LnsMod_PART
         return 0
+        
     def sample_z_source(self,z_source_min,z_source_max):
         # this is here to allow modularity 
         # for now a simple uniform sample, but we could define something more fancy
@@ -427,18 +504,15 @@ class Lens_PART():
         self.alpha_x,self.alpha_y = alpha_x,alpha_y 
         return alpha_x,alpha_y
         
-    def get_kappa_map(self,kwargs_lens,lens_model_class):
+    def get_kappa_map(self):
         _ra,_dec = self.imageModel_ANL.ImageNumerics.coordinates_evaluate #arcsecs  
-        kappa_x,kappa_y = lens_model_class.kappa(_ra, _dec, kwargs_lens)
-        return kappa_x,kappa_y
+        kappa = self.lens_model_PART.kappa(_ra, _dec, self.kwargs_lens_PART)
+        return kappa
 
     def get_RADEC(self):
         _ra,_dec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
         RA,DEC   = util.array2image(_ra),util.array2image(_dec)
         return RA,DEC
-
-    def get_kappa_map_PART(self):
-        return self.get_kappa_map(self.kwargs_lens_PART,self.lens_model_PART)
 
     def update_kwargs_data_joint(self,add_noise=False):
         # updating it with the PM image
@@ -455,48 +529,29 @@ class Lens_PART():
             self.kwargs_data_joint["multi_band_list"][0][0]["noise_map"] = noise_map
         self.kwargs_data_joint["multi_band_list"][0][0]["image_data"] = self.image_sim
             
-    def __str__(self):
-        if not hasattr(self,"name",False):
-            self._setup_names()
-        return self.name
-        
-    def store(self):
-        if not hasattr(self,"pkl_path"):
-            self._setup_names()
-        # store this sim
-        # but not the most heavy parts
-        self_copy = deepcopy(self)
-        # delete kwargs_lens_PART 
-        # -> can be recovered fast from the Gal with setup_lenses
-        del self_copy.kwargs_lens_PART
-        # delete imagenumerics heaviest component (fast to recover)
-        self_copy.imageModel.ImageNumerics._numerics_subframe._grid = None
-
-        with open(self.pkl_path,"wb") as f:
-            pickle.dump(self_copy,f)
-        print("Saved "+self.pkl_path)
 
 from remade_gal import get_CM
 from project_gal import Gal2MRADEC,findDens
 def Gal2kw_samples(Gal,radius,proj_index,arcXkpc,nbins=200,scale_rad=5):
-    radius *=scale_rad
     # we scale the radius by a factor to be sure to include the center
+    radius *=scale_rad
     Ms,RAs,DECs = Gal2MRADEC(Gal,proj_index,arcXkpc=arcXkpc)
     # RA,DEC= arcsec, Ms = Msun
 
-    print("Some galaxy have a 'shifted' CM")
+    #print("Some galaxy have a 'shifted' CM")
     RA_cm,DEC_cm = get_CM(Ms,RAs,DECs)
     
-    kw_samples   = {}
     #print("We recenter around CM)#no it was not done previously-> now YES, but we still do it
     # should be ~0,0 anyway
-    print("We recenter around ~CM~: no, the densest point within a cercle of radius rad from the CM") 
+    #print(f"We recenter around ~CM~: no, the densest point within a cercle (r={radius}) from the CM") 
+    print(f"We recenter around the densest point within a cercle (r={radius}) from the CM") 
     RA_dns,DEC_dns = findDens(Ms,RAs,DECs,radius,nbins,(RA_cm,DEC_cm))
     
     print("Info:  CM vs Densest ")
     print("CM:",RA_cm,DEC_cm)
     print("Dns:",RA_dns,DEC_dns)
 
+    kw_samples   = {}
     kw_samples["RAs"]  = RAs-RA_dns   #arcsec
     kw_samples["DECs"] = DECs-DEC_dns  #arcsec
     
@@ -504,7 +559,7 @@ def Gal2kw_samples(Gal,radius,proj_index,arcXkpc,nbins=200,scale_rad=5):
     #kw_samples["DECs"] = DECs-DEC_cm  #arcsec
     kw_samples["Ms"]   = Ms    #Msun
     kw_samples["cm"]   = RA_cm-RA_dns,DEC_cm-DEC_dns  # 
-
+    """
     print("DEBUG---")
     plt.hist2d(to_dimless(RAs),to_dimless(DECs),
                        bins=[np.linspace(RA_cm.value - radius.value,RA_cm.value+radius.value,nbins),
@@ -515,9 +570,10 @@ def Gal2kw_samples(Gal,radius,proj_index,arcXkpc,nbins=200,scale_rad=5):
     plt.title("Radius:"+str(radius))
     tmp_name = "tmp/dens_hist2_cut.png"
     plt.savefig(tmp_name)
+    plt.close()
     print("Saved "+tmp_name)
     print("---DEBUG")
-
+    """
     return kw_samples
 
 
@@ -526,46 +582,28 @@ def Gal2kw_samples(Gal,radius,proj_index,arcXkpc,nbins=200,scale_rad=5):
 #
 
 # this function is a wrapper for convenience - it takes the class itself as input
-def ReadClass(aClass,verbose=True):
-    return LoadClass(aClass.pkl_path,verbose=verbose)
+from python_tools.get_res import LoadClass
 
-def LoadClass(path,verbose=True):
-    if os.path.isfile(path):
-        print("File "+path+" is present")
-        try:
-            return _LoadClass(path=path,verbose=verbose)
-        except Exception as e:
-            print("But failed to load: "+str(e))
-            return False
-    else:
-        print("File not present")
-        return False
-        
-def _LoadClass(path,verbose=True):
-    with open(path,"rb") as f:
-        aClass = pickle.load(f)
-    gridClassType = getattr(aClass.kwargs_numerics,"compute_mode","regular")
-    if gridClassType =="regular":
-        from lenstronomy.ImSim.Numerics.grid import RegularGrid as Grid
-    elif gridClassType  == "adaptive":
-        from lenstronomy.ImSim.Numerics.grid import AdaptiveGrid as Grid
-    recomputed_grid = Grid(nx=aClass.pixel_num,ny=aClass.pixel_num,
-    transform_pix2angle=aClass.imageModel.Data.transform_pix2angle,
-    ra_at_xy_0=aClass.imageModel.Data.radec_at_xy_0[0],
-    dec_at_xy_0=aClass.imageModel.Data.radec_at_xy_0[1])
-    aClass.imageModel.ImageNumerics._numerics_subframe._grid = recomputed_grid 
-    # recover also kwargs_lens_PART:
-    aClass.setup_lenses() 
-    if verbose:
-        print(f"Loaded {aClass.pkl_path}")
-    return aClass
+# we override the standard loading function to recompute some large dataset that
+# are deleted to save space
+def LoadLens(LnsCl,verbose=True):
+    LnsCl = LoadClass(LnsCl,verbose=verbose)
+    # has to consider the possibility it failed to load
+    if LnsCl: 
+        # recompute deleted components
+        LnsCl.unpack()
+    return LnsCl
+    
+def ReadLens(aClass,verbose=True):
+    return LoadLens(aClass.pkl_path,verbose=verbose)
+
 
 
 
 def _plot_caustics(aClass,
-                   lensModelExt_1stModel,
-                   str_1stModel,
-                   kwargs_lens_1stM,
+                   lensModelExt,
+                   str_model,
+                   kwargs_lens,
                    fast_caustic = True,savename="test_caustics.png",skip_show=False):
     _coords     = aClass.data_class
     deltaPix    = aClass.deltaPix
@@ -583,21 +621,21 @@ def _plot_caustics(aClass,
     except FileNotFoundError:    
         print("File not found: "+filename)        
         if fast_caustic:
-            ra_crit_list_1stM, dec_crit_list_1stM, ra_caustic_list_1stM, dec_caustic_list_1stM = lensModelExt_1stModel.critical_curve_caustics(kwargs_lens_1stM, compute_window=_frame_size, grid_scale=deltaPix)
+            ra_crit_list, dec_crit_list_, ra_caustic_list_1stM, dec_caustic_list_1stM = lensModelExt.critical_curve_caustics(kwargs_lens, compute_window=_frame_size, grid_scale=deltaPix)
         else:
             raise RuntimeError("Doesn't output caustics")
 
-            ra_crit_list_1stM, dec_crit_list_1stM = lensModelExt_1stModel.critical_curve_tiling(kwargs_lens_1stM, compute_window=_frame_size,
+            ra_crit_list, dec_crit_list = lensModelExt.critical_curve_tiling(kwargs_lens, compute_window=_frame_size,
                                                                          start_scale=deltaPix, max_order=10)
-        results = ra_crit_list_1stM, dec_crit_list_1stM, ra_caustic_list_1stM, dec_caustic_list_1stM
+        results = ra_crit_list, dec_crit_list, ra_caustic_list, dec_caustic_list
         with open(filename,"wb") as f:
             pickle.dump(results,f)
         print("Saved "+filename)
             
-    plot_util.plot_line_set(ax[0], _coords, ra_caustic_list_1stM, dec_caustic_list_1stM, color='g')
-    ax[0].set_title("Caustic "+str_1stModel)
-    plot_util.plot_line_set(ax[1], _coords, ra_crit_list_1stM, dec_crit_list_1stM, color='r')
-    ax[1].set_title("CL "+str_1stModel)
+    plot_util.plot_line_set(ax[0], _coords, ra_caustic_list, dec_caustic_list, color='g')
+    ax[0].set_title("Caustic "+str_model)
+    plot_util.plot_line_set(ax[1], _coords, ra_crit_list, dec_crit_list, color='r')
+    ax[1].set_title("CL "+str_model)
     print("Saving "+savename) 
     plt.savefig(savename)
     if not skip_show:
@@ -605,13 +643,13 @@ def _plot_caustics(aClass,
     plt.close()
     
 def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",skip_show=False):
-    lensModelExt_1stModel = LensModelExtensions(Model.lens_model_PART)
-    kwargs_lens_1stM      = Model.kwargs_lens_PART
+    lensModelExt = LensModelExtensions(Model.lens_model_PART)
+    kwargs_lens  = Model.kwargs_lens_PART
 
-    str_1stModel = "PM"
+    str_model    = "PM"
 
     return _plot_caustics(Model,
-                          lensModelExt_1stModel,str_1stModel,kwargs_lens_1stM,
+                          lensModelExt,str_model,kwargs_lens,
                           fast_caustic=fast_caustic,savename=savename,skip_show=skip_show)
 
 
@@ -765,17 +803,19 @@ def plot_all(Model,savename_lensed="lensed_im.pdf",savename_kappa="kappa.png",sa
     plt.close()
     return 0
 
-from remade_gal import LoadGal
 if __name__ == "__main__":
     Gal = get_rnd_NG()
     #print("Loading specific gal for debugging")
-    #Gal = LoadGal("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_23//Gn3SGn0.pkl")
-    #Gal = LoadGal("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_16//Gn2SGn0.pkl") #  16.20.0 is a great one for Einstein Ring
-    #Gal = LoadGal("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_18/Gn23SGn0.pkl")
+    #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_23//Gn3SGn0.pkl")
+    #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_16//Gn2SGn0.pkl") #  16.20.0 is a great one for Einstein Ring
+    #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_18/Gn23SGn0.pkl")
     print("Pixel_num:",pixel_num)
     # for testing we reload the lensing data 
-    mod_LP = Lens_PART(Galaxy=Gal,kwlens_part=kwlens_part_AS,
+    mod_LP = LensPart(Galaxy=Gal,kwlens_part=kwlens_part_AS,
                        cutoff_radius=cutoff_radius,z_source_max=z_source_max, 
                        pixel_num=pixel_num,reload=False)
     mod_LP.run()
     plot_all(mod_LP,skip_show=True,skip_caustic=True)
+
+# for compatibility reason with previous versions:
+Lens_PART = LensPart
