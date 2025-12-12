@@ -1,12 +1,19 @@
-# copy from General_funct_parall.py -> delete kwargs_lens_PART before saving and re-compute it from samples
-# when loaded - > need to change how get_kwrg_prm works or find another way to do it
+# copy from Gen_PM_PLL_AMR_01 12/12/25
+# "slim" the saved components - delete everything which is 1)heavy 2) easy to recompute
+# and re-compute it automatically when loading the class
 
+# lens_model_PART: is already present in imageModel.LensModel
+# Gal : can be re-loaded
+# PMLens : can be re-computed
+# cosmo : present in Gal, can be re-computed
+#imageModel: very heavy, can be re-computed
+# all outputs of setup_lenses are very fast to compute and heavy - mainly lens_model_PART
 import os,pickle
 from scipy.stats import norm
 import numpy as np
 from copy import copy,deepcopy
 import matplotlib.pyplot as plt
-#from lenstronomy.LensModel.lens_model import LensModel 
+from functools import cached_property 
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from concurrent.futures import ThreadPoolExecutor
@@ -41,7 +48,6 @@ z_source_max  = 4
 # cutoff to define the 2D density hist
 # from there the maximum density pixel
 # and from there min_z_source
-cutoff_radius = 100*u.kpc 
 
 
 
@@ -107,9 +113,8 @@ def _build_kwargs_lens_PM(args):
 # From EAGLE simulation
 
 from remade_gal import get_rnd_NG,get_lens_dir
-from project_gal import prep_Gal_projpath
-
-#
+from project_gal_AMR import prep_Gal_projpath
+from project_gal_AMR import projection_main_AMR, Gal2kw_samples,project_kw_parts,kwparts2arcsec
 # Helper funct - create the kwargs_lens given the part. parameters, ie theta_E,x,y,(core if needed) 
 # and the lens_model
 #
@@ -251,7 +256,7 @@ class PMLens():
                 return False
         return True
 """
-def get_LensSystem_kwrgs(deltaPix,pixel_num=pixel_num,background_rms=0.005,exp_time=500):
+def get_LensSystem_kwrgs(deltaPix,pixel_num=pixel_num,background_rms=0.005,exp_time=500,ra_source=0.,dec_source = 0.):
     # data specifics
     # background noise per pixel
     # exposure time (arbitrary units, flux per pixel is in units #photons/exp_time unit)
@@ -263,15 +268,7 @@ def get_LensSystem_kwrgs(deltaPix,pixel_num=pixel_num,background_rms=0.005,exp_t
     kwargs_psf  = {'psf_type': 'NONE'}  
     psf_class   = PSF(**kwargs_psf)
     # Source Params
-    source_model_list = ['SERSIC_ELLIPSE']
-    ra_source, dec_source = 0., 0.
-    kwargs_sersic_ellipse = {'amp': 4000., 'R_sersic': .1, 'n_sersic': 3, 
-                            'center_x': ra_source,
-                             'center_y': dec_source, 
-                             'e1': -0.1, 'e2': 0.01}
-
-    kwargs_source = [kwargs_sersic_ellipse]
-    source_model_class = LightModel(light_model_list=source_model_list)
+    source_model_class,kwargs_source = get_model_source(ra_source,dec_source)
     kwargs_numerics = {'supersampling_factor': 1, 'supersampling_convolution': False}
 
     # for modelling later:
@@ -280,7 +277,18 @@ def get_LensSystem_kwrgs(deltaPix,pixel_num=pixel_num,background_rms=0.005,exp_t
                      'multi_band_type': 'single-band'}
     return data_class, psf_class, source_model_class, kwargs_numerics, kwargs_source,kwargs_data_joint
 
+def get_model_source(ra_source=0,dec_source=0):
+    source_model_list = ['SERSIC_ELLIPSE']
+    
+    kwargs_sersic_ellipse = {'amp': 4000., 'R_sersic': .1, 'n_sersic': 3, 
+                            'center_x': ra_source,
+                             'center_y': dec_source, 
+                             'e1': -0.1, 'e2': 0.01}
 
+    kwargs_source = [kwargs_sersic_ellipse]
+    source_model_class = LightModel(light_model_list=source_model_list)
+    return source_model_class,kwargs_source
+    
 ##########################
 # Model class for parts. #
 ##########################
@@ -289,7 +297,7 @@ kwlens_part_AS = {"type":"AS","theta_cAS":theta_c_AS}
 kwlens_part_PM = {"type":"PM"}
 from time import time # for DEBUG
 from remade_gal import Gal2kwMXYZ
-from project_gal import prep_Gal_projpath,get_rough_radius,get_minzsource_proj,proj_parts
+from project_gal_alpha import get_rough_radius
 
 
 class LensPart(): 
@@ -297,7 +305,6 @@ class LensPart():
                     Galaxy,
                     kwlens_part, # if PM or AS, and if so size of the core
                     pixel_num=pixel_num, # sim prms 
-                    cutoff_radius = cutoff_radius, # ONLY for z_source computation (!=! radius, which is instead obtained from an estimate of theta_E)
                     z_source_max  = z_source_max,     # for z_source sampling
                     #z_lens=z_lens,z_source=z_source,cosmo=cosmo, # cosmo prms -> obtained from Galaxy 
                     exp_time=500,bckg_rms=0.01, # observation parameters
@@ -306,9 +313,11 @@ class LensPart():
         Galaxy            = prep_Gal_projpath(Galaxy) # just set up some directories
         # setup of data
         self.Gal           = Galaxy
+        self.Gal_path      = Galaxy.get_pkl_path()
         self.kwlens_part   = kwlens_part
         lens_dir           = get_lens_dir(self.Gal)
         self.savedir_sim   = savedir_sim
+        mkdir(savedir_sim)
         self.savedir       = f"{lens_dir}/{savedir_sim}"
         self.reload        = reload
         self.pixel_num     = pixel_num      
@@ -320,9 +329,7 @@ class LensPart():
 
         # To obtain the z_source and projection index 
         #-> computed only once in the run function
-        self.z_source_max  = z_source_max
-        self.cutoff_radius = cutoff_radius
-        
+        self.z_source_max  = z_source_max        
         # observational params
         self.exp_time  =  exp_time
         self.bckg_rms  =  bckg_rms
@@ -339,7 +346,7 @@ class LensPart():
         Id = (self.Gal._identity(),
               self.PMLens._identity(),
               self.pixel_num,
-              self.z_source_max,self.cutoff_radius,
+              self.z_source_max,
               self.exp_time,self.bckg_rms)
         return Id
     
@@ -356,26 +363,54 @@ class LensPart():
         if not getattr(self,"name",False):
             self._setup_names()
         return self.name
-        
+    # the following struct. is more clear and allow a slimmer stored class
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # remove large but recomputable attributes (if present)
+        state.pop('kwargs_lens_PART', None)
+        state.pop('lens_model_PART', None)
+        state.pop('kw_shear',None)
+        state.pop('imageModel',None)
+        # Gal should not be stored again, but reloaded afterwards
+        state.pop('Gal',None)
+        # PMLens is easy to recompute (careful to set it up as well)
+        state.pop('PMLens',None)
+        # cosmo can be obtain by Gal
+        state.pop('cosmo',None)
+        # could also remove image_sim if it's heavy
+        #try:
+        #    state['imageModel'].ImageNumerics._numerics_subframe._grid = None
+        #except Exception:
+        #    pass
+        return state
+
+    def __setstate__(self, state):
+        # Optional: restore defaults or trigger rebuild of heavy attributes
+        self.__dict__.update(state)
+
     def store(self):
         if not hasattr(self,"pkl_path"):
             self._setup_names()
-        # store this sim
-        # but not the most heavy parts (recovered with the unpack function)
-        self_copy = deepcopy(self)
-        # delete kwargs_lens_PART 
-        # -> can be recovered fast from the Gal with setup_lenses
-        del self_copy.kwargs_lens_PART
-        # delete imagenumerics heaviest component (fast to recover)
-        self_copy.imageModel.ImageNumerics._numerics_subframe._grid = None
-
-        with open(self.pkl_path,"wb") as f:
-            pickle.dump(self_copy,f)
-        print("Saved "+self.pkl_path)
+        with open(self.pkl_path, "wb") as f:
+            pickle.dump(self, f)
+        print("Saved", self.pkl_path)
         
-    def unpack(self):
+    def _unpack(self):
         # this function recover the parts deleted before storing
         # to save space
+        # reload Galaxy and cosmo
+        Galaxy = LoadClass(self.Gal_path)
+        Galaxy = prep_Gal_projpath(Galaxy)
+        self.Gal   = Galaxy
+        self.cosmo = Galaxy.cosmo
+        # re-define PMLens
+        self.PMLens = PMLens(self.kwlens_part)
+        self.PMLens.setup(self)
+        # recover kwargs_lens_PART and lens_model_PART
+        self.setup_lenses() 
+        # recover imageModel
+        self.get_imageModel()
+        """ -> the whole imageModel is deleted
         # recover the grid
         gridClassType = getattr(self.kwargs_numerics,"compute_mode","regular")
         if gridClassType =="regular":
@@ -386,9 +421,15 @@ class LensPart():
                         transform_pix2angle=self.imageModel.Data.transform_pix2angle,
                         ra_at_xy_0=self.imageModel.Data.radec_at_xy_0[0],
                         dec_at_xy_0=self.imageModel.Data.radec_at_xy_0[1])
+        
         self.imageModel.ImageNumerics._numerics_subframe._grid = recomputed_grid 
-        # recover also kwargs_lens_PART:
-        self.setup_lenses() 
+        """
+        return True
+        
+    def unpack(self):
+        #if self.imageModel.ImageNumerics._numerics_subframe._grid is None:
+        if getattr(self,"Gal",False) is False:
+            self._unpack()
         return True
     ########################
     ########################
@@ -421,57 +462,55 @@ class LensPart():
             upload_successful = self.upload_prev()
         if not upload_successful:
             # Read particles ONLY ONCE
-            kw_parts          = Gal2kwMXYZ(self.Gal) # kwargs of Msun,XYZ in kpc (explicitely) centered around Centre
+            kw_parts          = Gal2kwMXYZ(self.Gal) # kwargs of Msun,XYZ in kpc (explicitely) centered around Centre of Mass (CM)
+            
+            kwres_proj = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
+                            z_source_max=self.z_source_max,sample_z_source=self.sample_z_source,
+                            scale_radius=2,
+                            arcXkpc=self.arcXkpc,verbose=True,save_res=True,reload=True)
 
-            kwres_proj        = get_minzsource_proj(self.Gal,kw_parts,cutoff_radius=self.cutoff_radius,
-                                                   pixel_num=pixel_dens,z_source_max=self.z_source_max)
             self.proj_index   = kwres_proj["proj_index"]
             self.z_source_min = kwres_proj["z_source_min"]
-            print("Min Z source:",self.z_source_min)
-            print("Max Z source:",self.z_source_max)
-            self.z_source     = self.sample_z_source(z_source_min=self.z_source_min,
-                                                     z_source_max=self.z_source_max)
+            self.z_source     = kwres_proj["z_source"]
+            self.MD_coords    = kwres_proj["MD_coords"]
             print("Z source sampled:",self.z_source)
             # the following 2 can only be computed once we know the z_source:
             self.SigCrit       = SigCrit(cosmo=self.cosmo,z_lens=self.z_lens,z_source=self.z_source) # Msun/kpc^2
 
             self.PMLens.setup(self) # only run now bc it needs z_source 
-            
-            Xs,Ys    = proj_parts(kw_parts,self.proj_index)
-            RAs,DECs = Xs.to("kpc")*self.arcXkpc,Ys.to("kpc")*self.arcXkpc
-            kw_part_arc       = {"Ms":kw_parts["Ms"],"RAs":RAs,"DECs":DECs}
             # Then define the radius based on ~ theta_E
-            # note: computation actually pretty fast for get_rough_radius (~0.1sec)
-            self.radius      = get_rough_radius(cosmo=self.cosmo,
-                                                z_lens=self.z_lens,
-                                                z_source=self.z_source,
-                                                kw_part_arc=kw_part_arc,scale=2,verbose=verbose) # [arcsec]
-            if verbose:
-                print("Image radius:",np.round(self.radius,3))
+            self.radius    = kwres_proj["radius"]
+            print("Image radius:",np.round(self.radius,3))
     
             Diam_arcsec      = 2*self.radius #diameter in arcsec
             self.deltaPix    = Diam_arcsec/self.pixel_num # ''/pix
-
-            # images:
+            # setup dataclasses (dataclass,psf_class,sourcemodel and some helper kwargs):
             self.setup_dataclasses()
+            # setup imageModel:
+            self.get_imageModel()
+            # setup lenses 
             self.setup_lenses()
             # this is the most computationally intense function:
-            self.imageModel,self.image_sim  = self.get_lensed_image()
+            self.image_sim  = self.get_lensed_image()
             self.store()
 
-    def setup_dataclasses(self):
+    def setup_dataclasses(self,ra_source=0,dec_source=0):
         self.data_class,self.psf_class,self.source_model_class,\
         self.kwargs_numerics, self.kwargs_source,self.kwargs_data_joint = \
-                get_LensSystem_kwrgs(self.deltaPix,self.pixel_num,background_rms=self.bckg_rms,exp_time=self.exp_time)
+                get_LensSystem_kwrgs(self.deltaPix,self.pixel_num,background_rms=self.bckg_rms,exp_time=self.exp_time,
+                                     ra_source =ra_source,dec_source =dec_source)
         return 0
-
+    def update_source_position(self,ra_source,dec_source):
+        # useful if we want to put it in the center of the caustic
+        self.source_model_class,self.kwargs_source = get_model_source(ra_source,dec_source)
+        
     # the following is meant to be rerun every time we load the class to save space
-    # -> computationally not too intense (medium tho)
+    # -> computationally not intense 
     def setup_lenses(self):
-        if verbose:
-            print("Setting up lensing parameters")
+        print("Setting up lensing parameters")
         # Convert x,y,z in samples and get masses
-        kw_samples = Gal2kw_samples(self.Gal,self.radius,self.proj_index,self.arcXkpc)
+        kw_samples = Gal2kw_samples(Gal=self.Gal,proj_index=self.proj_index,
+                                    MD_coords=self.MD_coords,arcXkpc=self.arcXkpc)
         samples    = kw_samples["RAs"],kw_samples["DECs"]
         Ms         = kw_samples["Ms"]
         # Convert in lenses parameters 
@@ -487,28 +526,69 @@ class LensPart():
         return z_source
         
     def get_lensed_image(self):
-        if verbose:
-            print("Computing lensing PM deflection...")
-        imageModel = ImageModel(self.data_class, self.psf_class, 
-                                self.lens_model_PART, 
-                                self.source_model_class,lens_light_model_class=None,point_source_class=None, 
-                                kwargs_numerics=self.kwargs_numerics)
-        image_sim  = imageModel.image(self.kwargs_lens_PART, self.kwargs_source, kwargs_lens_light=None, kwargs_ps=None)
-        return imageModel,image_sim
-
-    def get_alpha_map(self):
-        _ra,_dec = self.imageModel_ANL.ImageNumerics.coordinates_evaluate #arcsecs  
+        self.unpack()
+        sourceModel  = self.source_model_class
+        imageModel   = self.imageModel
+        RA,DEC       = self.get_RADEC()
+        # if not already, compute alpha_map
+        alpha_x,alpha_y = self.alpha_map
+        print("Centering source in the center of the tangential caustic")
+        kw_caustics = self.critical_curve_caustics()
+        ra_ct,dec_ct = kw_caustics["caustics"]["tangential"]
+        self.update_source_position(np.mean(ra_ct),np.mean(dec_ct))
+        
+        x_source, y_source = RA-alpha_x,DEC-alpha_y
+        # the coords have to be given as flat
+        x_source = util.image2array(x_source)
+        y_source = util.image2array(y_source)
+        source_light = sourceModel.surface_brightness(x_source, y_source, self.kwargs_source, k=None)
+        image_sim    = imageModel.ImageNumerics.re_size_convolve(source_light, unconvolved=False)
+        # imageModel.image(self.kwargs_lens_PART, self.kwargs_source, kwargs_lens_light=None, kwargs_ps=None)
+        return image_sim
+        
+    def get_imageModel(self):
+        if not hasattr(self,"setup_dataclasses"):
+            self.setup_dataclasses()
+        if not hasattr(self,"lens_model_PART"):
+            self.setup_lenses()
+        self.imageModel = ImageModel(self.data_class, self.psf_class, 
+                        self.lens_model_PART, 
+                        self.source_model_class,lens_light_model_class=None,point_source_class=None, 
+                        kwargs_numerics=self.kwargs_numerics)
+        return self.imageModel
+    
+    @cached_property
+    def alpha_map(self):
+        return self._alpha_map(_radec=None)
+    @cached_property
+    def kappa_map(self):
+        return self._kappa_map(_radec=None)
+        
+    def _alpha_map(self,_radec=None):
+        print("Computing lensing PM deflection...")
+        self.unpack()
+        if _radec is None:
+            _radec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
+        _ra,_dec = _radec
         alpha_x,alpha_y = self.lens_model_PART.alpha(_ra, _dec, self.kwargs_lens_PART)
-        # once computed, should be stored
-        self.alpha_x,self.alpha_y = alpha_x,alpha_y 
+        alpha_x,alpha_y = util.array2image(alpha_x),util.array2image(alpha_y)
+        self.store()
         return alpha_x,alpha_y
         
-    def get_kappa_map(self):
-        _ra,_dec = self.imageModel_ANL.ImageNumerics.coordinates_evaluate #arcsecs  
+    def _kappa_map(self,_radec=None):
+        # very important! this is kappa only within the radec considered
+        print("Computing kappa map from PM...")
+        self.unpack()
+        if _radec is None:
+            _radec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
+        _ra,_dec = _radec
         kappa = self.lens_model_PART.kappa(_ra, _dec, self.kwargs_lens_PART)
+        kappa = util.array2image(kappa)
+        self.store()
         return kappa
 
     def get_RADEC(self):
+        self.unpack()
         _ra,_dec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
         RA,DEC   = util.array2image(_ra),util.array2image(_dec)
         return RA,DEC
@@ -527,54 +607,75 @@ class LensPart():
             noise_map =  np.sqrt(poisson**2+bkg**2)
             self.kwargs_data_joint["multi_band_list"][0][0]["noise_map"] = noise_map
         self.kwargs_data_joint["multi_band_list"][0][0]["image_data"] = self.image_sim
-            
 
-from remade_gal import get_CM
-from project_gal import Gal2MRADEC,findDens
-def Gal2kw_samples(Gal,radius,proj_index,arcXkpc,nbins=200,scale_rad=5):
-    # we scale the radius by a factor to be sure to include the center
-    scaled_rad  = radius*scale_rad
-    Ms,RAs,DECs = Gal2MRADEC(Gal,proj_index,arcXkpc=arcXkpc)
-    # RA,DEC= arcsec, Ms = Msun
+    # Shear components and caustics/CL
+    @cached_property    
+    def hessian(self):
+        # Note: this hessian only consider the contribution of the alpha map within the cutout!
+        alpha_x,alpha_y = self.alpha_map
+        # taking the non-dimensional pixel scale for the gradient
+        dalpha_x_dy, dalpha_x_dx = np.gradient(alpha_x, to_dimless(self.deltaPix))
+        dalpha_y_dy, dalpha_y_dx = np.gradient(alpha_y, to_dimless(self.deltaPix))
+        print("Note: Taking the average of dalpha_x_dy and dalpha_y_dx for fxy")
+        f_xx,f_xy,f_yy  = dalpha_x_dx,(dalpha_x_dy+dalpha_y_dx)/2.,dalpha_y_dy
+        return f_xx,f_xy,f_yy
+        
+    def get_kw_shear(self):
+        f_xx,f_xy,f_yy = self.hessian
+        # derived kappa, shear1,shear2 and shear
+        """
+        # this is not almost equal up to 2 decimal in ~40% of the cases -> investigate
+        kappa  = (f_xx + f_yy)/2.
+        np.testing.assert_almost_equal(kappa,self.kappa_map,decimal=2)
+        """
+        shear1 = 1./2 * (f_xx - f_yy)
+        shear2 = f_xy
+        shear  = np.hypot(shear1,shear2)
+        self.kw_shear = {"shear1":shear1,"shear2":shear2,"shear":shear}
+        return self.kw_shear
+        
+    @property
+    def shear_map(self):
+        if hasattr(self,"kw_shear"):
+            return self.kw_shear["shear"]
+        return self.get_kw_shear()["shear"]
+        
+    def critical_curve_caustics(self):
+        # no need to save this - as long as we have {kappa,shear,alpha}_map,
+        # it's fast to compute
+        kappa = self.kappa_map
+        shear = self.shear_map
+        alpha_x,alpha_y = self.alpha_map
+        # radial and tangential eigenvalues
+        eigen_rad = 1 - kappa + shear
+        eigen_tan = 1 - kappa - shear
+        # have to find when those are ~0
+        mask_rad = MAD_mask(eigen_rad)
+        mask_tan = MAD_mask(eigen_tan)
+        ierx,iery = np.where(mask_rad.T==1)
+        ietx,iety = np.where(mask_tan.T==1)
+        # coords
+        RA,DEC      = self.get_RADEC()
+        ra0,dec0    = RA[0],DEC.T[0]
+        # critical and caustics divided in tangential and radial
+        cl_rad_x,cl_rad_y   = ra0[ierx],dec0[iery]    
+        cc_rad_x,cc_rad_y   = ra0[ierx]-alpha_x[iery,ierx],dec0[iery]-alpha_y[iery,ierx]  
+        cl_tan_x,cl_tan_y   = ra0[ietx],dec0[iety]    
+        cc_tan_x,cc_tan_y   = ra0[ietx]-alpha_x[iety,ietx],dec0[iety]-alpha_y[iety,ietx]  
+        kw_crit = {"caustics":{"radial":[cc_rad_x,cc_rad_y],"tangential":[cc_tan_x,cc_tan_y]},
+                   "critical_lines":{"radial":[cl_rad_x,cl_rad_y],"tangential":[cl_tan_x,cl_tan_y]}
+                  }
+        return kw_crit
+                
+def MAD_mask(values,v0=0,sigma_scale=3):
+    # robust estimator of noise: Median Absolute Deviation    
+    mad = np.median(np.abs(values - np.median(values)))
 
-    #print("Some galaxy have a 'shifted' CM")
-    RA_cm,DEC_cm = get_CM(Ms,RAs,DECs)
-    
-    #print("We recenter around CM)#no it was not done previously-> now YES, but we still do it
-    # should be ~0,0 anyway
-    #print(f"We recenter around ~CM~: no, the densest point within a cercle (r={scaled_rad}) from the CM") 
-    print(f"We recenter around the densest point within a cercle (r={np.round(scaled_rad,2)}) from the CM") 
-    RA_dns,DEC_dns = findDens(Ms,RAs,DECs,scaled_rad,nbins,(RA_cm,DEC_cm))
-    
-    print("Info:  CM vs Densest ")
-    print("CM:",np.round(RA_cm,2),np.round(DEC_cm,2))
-    print("Dns:",np.round(RA_dns,2),np.round(DEC_dns,2))
-    print("Dist:",np.round(np.sqrt((RA_cm-RA_dns)**2+(DEC_cm-DEC_dns)**2),2))
+    sigma = 1.4826 * mad
 
-    kw_samples   = {}
-    kw_samples["RAs"]  = RAs-RA_dns   #arcsec
-    kw_samples["DECs"] = DECs-DEC_dns  #arcsec
-    
-    #kw_samples["RAs"]  = RAs-RA_cm   #arcsec
-    #kw_samples["DECs"] = DECs-DEC_cm  #arcsec
-    kw_samples["Ms"]   = Ms    #Msun
-    kw_samples["cm"]   = RA_cm-RA_dns,DEC_cm-DEC_dns  # 
-    """
-    print("DEBUG---")
-    plt.hist2d(to_dimless(RAs),to_dimless(DECs),
-                       bins=[np.linspace(RA_cm.value - radius.value,RA_cm.value+radius.value,nbins),
-            np.linspace(DEC_cm.value - radius.value,DEC_cm.value+radius.value,nbins)],
-                       weights=to_dimless(Ms))
-    plt.axvline(RA_dns.value)
-    plt.axhline(DEC_dns.value)
-    plt.title("Radius:"+str(radius))
-    tmp_name = "tmp/dens_hist2_cut.png"
-    plt.savefig(tmp_name)
-    plt.close()
-    print("Saved "+tmp_name)
-    print("---DEBUG")
-    """
-    return kw_samples
+    mask = np.abs(values-v0) < sigma_scale*sigma   # ~99.7% Gaussian confidence
+    return mask
+
 
 
 #
@@ -600,12 +701,16 @@ def ReadLens(aClass,verbose=True):
 
 
 
-def _plot_caustics(aClass,
+def _plot_caustics(LPClass,
                    lensModelExt,
                    str_model,
                    kwargs_lens,
-                   fast_caustic = True,savename="test_caustics.png",skip_show=False):
-    _coords     = aClass.data_class
+                   kw_extent=None,
+                   fast_caustic = True,
+                   savename="test_caustics.png"):
+    raise RuntimeError("To re-implement in a better way")
+    """
+    _coords     = LPClass.data_class
     deltaPix    = aClass.deltaPix
     _frame_size = aClass.pixel_num * deltaPix
 
@@ -631,15 +736,36 @@ def _plot_caustics(aClass,
         with open(filename,"wb") as f:
             pickle.dump(results,f)
         print("Saved "+filename)
-            
+    
     plot_util.plot_line_set(ax[0], _coords, ra_caustic_list, dec_caustic_list, color='g')
     ax[0].set_title("Caustic "+str_model)
     plot_util.plot_line_set(ax[1], _coords, ra_crit_list, dec_crit_list, color='r')
     ax[1].set_title("CL "+str_model)
+    """
+    if kw_extent is None:
+        kw_extent = get_extents(LPClass.imageModel,LPClass.arcXkpc) 
+    xmin,xmax,ymin,ymax = kw_extent["extent_arcsec"]
+    kw_crit = LPClass.critical_curve_caustics()
+    cl_rad_x,cl_rad_y   = kw_crit["critical_lines"]["radial"]
+    cc_rad_x,cc_rad_y   = kw_crit["caustics"]["radial"]
+    cl_tan_x,cl_tan_y   = kw_crit["critical_lines"]["tangential"]
+    cc_tan_x,cc_tan_y   = kw_crit["caustics"]["tangential"]
+
+    cent_caust_tan = np.mean(cc_tan_x),np.mean(cc_tan_y)
+    fig,ax = plt.subplots()
+    ax.scatter(cc_rad_x,cc_rad_y,c="k",marker=".",label="Radial Caustics")
+    ax.scatter(cc_tan_x,cc_tan_y,c="y",marker=".",label="Tangential Caustics")
+    ax.scatter(*cent_caust_tan_PART,c="k",marker="x",label="Tang. Center Caustic")
+    ax.set_xlim(xmin,xmax)
+    ax.set_ylim(ymin,ymax)
+    ax.set_xlabel("RA ['']")
+    ax.set_ylabel("DEC ['']")
+    ax.legend()
+    ax.set_title("Caustics Lines") 
+    
+    plt.tight_layout()
     print("Saving "+savename) 
     plt.savefig(savename)
-    if not skip_show:
-        plt.show()
     plt.close()
     
 def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",skip_show=False):
@@ -652,7 +778,7 @@ def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",skip_sh
                           lensModelExt,str_model,kwargs_lens,
                           fast_caustic=fast_caustic,savename=savename,skip_show=skip_show)
 
-
+"""
 def get_kappa(Model,plot=True,savename="comp_kappa.png",skip_show=False):
     if "tcAS" in Model.PMLens.name:
         raise RuntimeError("this is not the real kappa, but the histogram of the particle as if they had no size")
@@ -668,9 +794,9 @@ def get_kappa(Model,plot=True,savename="comp_kappa.png",skip_show=False):
                       plot       = plot,
                       savename   = savename,
                       skip_show  = skip_show)
-
-def get_extents(imageModel,arcXkpc):
-    _ra,_dec = imageModel.ImageNumerics.coordinates_evaluate #arcsecs 
+"""
+def get_extents(Model,arcXkpc):
+    _ra,_dec = Model.imageModel.ImageNumerics.coordinates_evaluate #arcsecs 
     RA,DEC   = util.array2image(_ra),util.array2image(_dec)
     ra0,dec0 = RA[0]*u.arcsec,DEC.T[0]*u.arcsec # center of the bin
 
@@ -698,7 +824,7 @@ def get_extents(imageModel,arcXkpc):
               "bins_arcsec":bins_arcsec,
               "DRaDec":[Dra01,Ddec01]}
     return kw_ext
-    
+"""
 def _get_kappa(imageModel,samples,Ms,
                           arcXkpc,SigCrit,
                           plot=True,savename="kappa.png",skip_show=True):
@@ -723,7 +849,7 @@ def _get_kappa(imageModel,samples,Ms,
         plot_kappamap(kappa_PART,extent_kpc=kw_ext["extent_kpc"],title1=r"$\kappa$ Part.",savename=savename,skip_show=skip_show)
     return kappa_PART,kw_ext
 
-
+"""
 def plot_kappamap(kappa1,extent_kpc,title1="",savename="kappa.png",skip_show=False):
     fig,axes = plt.subplots(2,figsize=(8,16))
 
@@ -758,9 +884,11 @@ def plot_kappamap(kappa1,extent_kpc,title1="",savename="kappa.png",skip_show=Fal
     plt.close()
 
 
-def plot_lensed_im_and_kappa(Model,savename="lensed_im.pdf",skip_show=False):
-    kappa,kw_extents = get_kappa(Model,plot=False)
-    
+def plot_lensed_im_and_kappa(Model,savename="lensed_im.pdf",kw_extents=None):
+    #kappa,kw_extents = get_kappa(Model,plot=False)
+    kappa = Model.kappa_map
+    if kw_extents is None:
+        kw_extents = get_extents(Model,Model.arcXkpc)
     fg,axes = plt.subplots(1,2,figsize=(10,5))
     ax = axes[0]
 
@@ -789,22 +917,23 @@ def plot_lensed_im_and_kappa(Model,savename="lensed_im.pdf",skip_show=False):
     plt.tight_layout()
     print("Saving "+savename) 
     plt.savefig(savename)
-    if not skip_show:
-        plt.show()
     plt.close()
     
-def plot_all(Model,savename_lensed="lensed_im.pdf",savename_kappa="kappa.png",savename_caustics="caustics.png",fast_caustic=True,skip_show=False,skip_caustic=False):
+def plot_all(Model,savename_lensed="lensed_im.pdf",savename_kappa="kappa.png",savename_caustics="caustics.png",fast_caustic=True,skip_caustic=False):
     
     #plot_lensed_im(Model,savename=Model.savedir+"/"+savename_lensed,skip_show=skip_show)
     #get_kappa(Model,savename=Model.savedir+"/"+savename_kappa,skip_show=skip_show)
-    plot_lensed_im_and_kappa(Model,savename=Model.savedir+"/"+savename_lensed,skip_show=skip_show)
+    kw_extents = get_extents(Model,Model.arcXkpc)
+    plot_lensed_im_and_kappa(Model,savename=Model.savedir+"/"+savename_lensed,kw_extents=kw_extents)
     if not skip_caustic:
-        plot_caustics(Model,fast_caustic=fast_caustic,savename=Model.savedir+"/"+savename_caustics,skip_show=skip_show)
+        plot_caustics(Model,fast_caustic=fast_caustic,savename=Model.savedir+"/"+savename_caustics,kw_extents=kw_extents)
     plt.close()
     return 0
 # for compatibility reason with previous versions:
 Lens_PART = LensPart
 
+
+
 if __name__ == "__main__":
-    print("Do not run this script, but test_Gen_PM_PLL.py")
+    print("Do not run this script, but test_Gen_PM_PLL_AMR.py")
     exit()

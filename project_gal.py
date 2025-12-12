@@ -36,10 +36,12 @@ def proj_parts(kw_parts,proj_index,arcXkpc=None):
     elif proj_index==2:
         Xs  = copy(Ys)
         Ys  = copy(Zs)    
+    else:
+        raise RuntimeError("Projection index can only be 1,2 or 3, not "+str(proj_index))
     return Xs,Ys 
 
 def findDens(M,X,Y,rad,nbins=200,XYCM=None):
-    # loacte the coordinates of the densest bin
+    # locate the coordinates of the densest bin
     if XYCM is None:
         XYCM = get_CM(M,X,Y)
     X_cm,Y_cm = XYCM
@@ -78,9 +80,9 @@ def get_minzsource_proj(Gal,kw_parts,cutoff_radius,pixel_num,z_source_max,verbos
     # else compute it
     while proj_index<3:
         try:
-            kw_res = get_min_z_source(Gal=Gal,kw_parts=deepcopy(kw_parts),cutoff_radius=cutoff_radius,
-                                    proj_index=proj_index,pixel_num=pixel_num,
-                                    z_source_max=z_source_max,verbose=verbose)
+            kw_res = get_min_z_source(Gal=Gal,proj_index=proj_index,
+                                      kw_parts=deepcopy(kw_parts),cutoff_radius=cutoff_radius,
+                                      pixel_num=pixel_num,z_source_max=z_source_max,verbose=verbose)
             break
         except AttributeError as Ae:
             print("Error : ")
@@ -89,7 +91,8 @@ def get_minzsource_proj(Gal,kw_parts,cutoff_radius,pixel_num,z_source_max,verbos
             # try with other proj
             proj_index+=1
     if kw_res is None:
-        print("M(gal)",Gal.M_tot)
+        print("M(gal)",short_SciNot(Gal.M_tot))
+        print("z_gal",Gal.z)
         raise RuntimeError("There is no projection of the galaxy that create a lens given the z_source_max")
     else:
             
@@ -99,61 +102,95 @@ def get_minzsource_proj(Gal,kw_parts,cutoff_radius,pixel_num,z_source_max,verbos
             print("Saved "+Gal.proj_zs_path)
         return kw_res
 
-def get_min_z_source(Gal,kw_parts,proj_index,pixel_num,z_source_max,cutoff_radius,verbose=True):
-    Ms,Xs,Ys,Zs = kw_parts["Ms"],kw_parts["Xs"],kw_parts["Ys"],kw_parts["Zs"]
-    nx,ny       = int(pixel_num),int(pixel_num) # note:pixel_num now are real, integ. number
-        
-    # given a projection, return the minimal z_source
-    # fails if it can't produce a supercritical lens w. z_source<z_source_max
-     
-    
-    # project given the proj_index
-    Xs,Ys = proj_parts({"Xs":Xs,"Ys":Ys,"Zs":Zs},proj_index)
-    # recenter around 
-    Xdns,Ydns = findDens(Ms,Xs,Ys,cutoff_radius)
-    Xs -= Xdns
-    Ys -= Ydns
-    x  = np.asarray(Xs.to("kpc").value) #kpc
-    y  = np.asarray(Ys.to("kpc").value) #kpc
-    m  = np.asarray(Ms.to("solMass").value, dtype=float)  # M_sol
-
-    # Redshift: 
-    z_lens = Gal.z 
-    cosmo  = Gal.cosmo 
-    # X,Y already recentered around 0
-    
-    cutoff_radius = to_dimless(cutoff_radius) #kpc
+def xyminmax(cutoff_radius):
+    cutoff_radius = to_dimless(cutoff_radius)
+    # assuming x,y centred around 0
     xmin = -cutoff_radius
     ymin = -cutoff_radius
     xmax = +cutoff_radius
     ymax = +cutoff_radius
+    rng  = [[xmin, xmax], [ymin, ymax]] 
+    return rng
+    
+def get_densmap_dimless(x,y,m,pixel_num,cutoff_radius,verbose=True,ret_mgrid=False,plot=False):
+    # Get density map (dimensionless)
+    # Assumed dimless values
+    nx,ny = int(pixel_num.imag),int(pixel_num.imag)
+    if nx==0:
+        nx,ny = int(pixel_num), int(pixel_num)
+    # get range from cutoff_radius
+    rng = xyminmax(cutoff_radius)
+    
     # numpy.histogram2d returns H with shape (nx_bins, ny_bins) where H[i,j]
     # counts x-bin i and y-bin j. We transpose to (ny, nx) so rows are y.
     H, xedges, yedges = np.histogram2d(x, y, bins=[nx, ny],
-                                       range=[[xmin, xmax], [ymin, ymax]],
+                                       range=rng,
                                        weights=m,density=False)  
     # if density=True, it normalises it to the total density
     # H is then the distribution of mass for each bin, not the density
     mass_grid = H.T.copy() # Solar Masses
     # H shape: (nx, ny) -> transpose to (ny, nx)
-    plt.close()
-    plt.imshow(np.log10(mass_grid))
-    plt.title("Gal Name:"+Gal.Name)
-    plt.colorbar()
-    plt.savefig("tmp/mass_"+str(proj_index)+".png")
-    print("DEBUG:"+"tmp/mass_"+str(proj_index)+".png")
-    plt.close()
+    if plot:
+        plt.close()
+        plt.imshow(np.log10(mass_grid))
+        plt.title("Gal Name:"+Gal.Name)
+        plt.colorbar()
+        plt.savefig("tmp/mass_"+str(proj_index)+".png")
+        print("DEBUG:"+"tmp/mass_"+str(proj_index)+".png")
+        plt.close()
     # area of the (dx/dy) bins:
     dx = np.diff(xedges) #kpc #==(xmax - xmin) / nx 
     dy = np.diff(yedges) #kpc
+
     # density_ij = M_ij/(Area_bin_ij)
     density = mass_grid / (dx * dy)
-    print("<Area>",np.mean(dx*dy), "kpc^2") 
+    if verbose:
+        print("Note: following dimension are assumed")
+        print("<dx,dy>",np.round(np.mean(dx),2),np.round(np.mean(dy),2),"kpc")
+        print("<Bin Area>",np.round(np.mean(dx*dy),2), "kpc^2") 
+        print("<mass>",short_SciNot(np.round(np.mean(mass_grid),2)),"Msun")
+        print("<density>",short_SciNot(np.round(np.mean(density),2)),"Msun/kpc^2")
+    if ret_mgrid:
+        return density,mass_grid
+    return density
     
-    # dens now is in Msun/kpc^2 
+def get_densmap(kw_parts,proj_index,pixel_num,cutoff_radius,cutoff_radius_dens=None,verbose=True):
+    # Get density map from kw_parts and projected index (dimensional)
+    # note: in principle kw_parts could be not given and re-obtained from Gal with
+    #  kw_parts = Gal2kwMXYZ(Gal) from remade_Gal
+    Ms  = kw_parts["Ms"]
+    # project given the proj_index
+    Xs,Ys = proj_parts(kw_parts,proj_index)
+    # recenter around densest point 
+    if cutoff_radius_dens is None:
+        # cutoff_radius_dens is used to have a first (quite alright)
+        # estimate of the densest point -> by def == cutoff_radius
+        # but not necessarily so
+        cutoff_radius_dens = cutoff_radius
+    Xdns,Ydns = findDens(Ms,Xs,Ys,cutoff_radius_dens)
+    Xs -= Xdns
+    Ys -= Ydns
+    # Get density map (dimensional)
+    x  = np.asarray(Xs.to("kpc").value) #kpc
+    y  = np.asarray(Ys.to("kpc").value) #kpc
+    m  = np.asarray(Ms.to("solMass").value)  # M_sol
+    
+    cutoff_radius = to_dimless(cutoff_radius) #kpc
+    density = get_densmap_dimless(x,y,m,pixel_num,cutoff_radius,\
+                                  verbose=verbose,ret_mgrid=False,plot=False)
+    # Dens now is in Msun/kpc^2 
     dens_Ms_kpc2 = density*u.Msun/(u.kpc*u.kpc)
+    return dens_Ms_kpc2
+
+def get_min_z_source(Gal,proj_index,kw_parts,pixel_num,z_source_max,cutoff_radius,verbose=True):
+    # given a projection, return the minimal z_source
+    # fails if it can't produce a supercritical lens w. z_source<z_source_max
+
+    # Get density map (dimensional)
+    dens_Ms_kpc2 = get_densmap(kw_parts,proj_index,pixel_num,cutoff_radius,verbose=verbose)
+
     # define the z_source:        
-    z_source_min = _get_min_z_source(cosmo=cosmo,z_lens=z_lens,dens_Ms_kpc2=dens_Ms_kpc2,
+    z_source_min = _get_min_z_source(cosmo=Gal.cosmo,z_lens=Gal.z,dens_Ms_kpc2=dens_Ms_kpc2,
                             z_source_max=z_source_max,verbose=verbose)
     if z_source_min==0:
         raise AttributeError("Rerun trying different projection")
@@ -196,7 +233,7 @@ def _get_min_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max,verbose=True):
             plt.legend()
             name = "tmp/DsDds.pdf"
             plt.savefig(name)
-            print("max density",np.max(dens_Ms_kpc2))
+            print("max density",short_SciNot(np.max(dens_Ms_kpc2)))
             print("Saved "+name)
         return 0
     else:
@@ -245,7 +282,7 @@ def theta_E_from_particles(Ms, RA, DEC, Dd, Ds, Dds, nbins=100,verbose=True,sigm
     t_edges = t_max * np.sqrt(i / nbins)
     r_edges = t_edges/arcXkpc 
     hist, edges = np.histogram(r_kpc, bins=r_edges, weights=Ms)
-    rmid = 0.5*(edges[1:] + edges[:-1])
+    rmid = 0.5*(edges[1:] + edges[:-1]) #kpc
 
     # Smooth Σ(R)
     Sigma_R = hist / (2*np.pi*rmid*np.diff(edges))  # convert to Σ(R)
@@ -261,21 +298,14 @@ def theta_E_from_particles(Ms, RA, DEC, Dd, Ds, Dds, nbins=100,verbose=True,sigm
     print("theta_E_arcsec found",theta_E_arcsec)
     plt.scatter(rmid,Sigma_encl)
     plt.axhline(Sigma_crit.value,ls="--",c="r",label=r"$\Sigma_{crit}$")
-    plt.axvline(to_dimless(theta_E_kpc),label=r"$\theta_E$="+str(theta_E_kpc))
-    plt.xlabel(r"''")
+    plt.axvline(to_dimless(theta_E_kpc),label=r"$\theta_E$="+str(short_SciNot(theta_E_kpc)))
+    plt.xlabel(r"kpc")
     plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl.unit)+"]")
     plt.title(r"$\Sigma_{encl}$")
     plt.legend()
     nm_tmp = "tmp/Sigma.png"
     plt.savefig(nm_tmp)
     plt.close()
-
-    #if np.all(Sigma_encl < Sigma_crit):
-    #    raise RuntimeError()
-    #    return None  # no Einstein radius
-
-    
-    
     return theta_E_arcsec
 
 """
