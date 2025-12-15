@@ -37,7 +37,7 @@ from lenstronomy.Plots import plot_util
 
 from python_tools.fwhm import get_fwhm
 from python_tools.tools import mkdir,short_SciNot,to_dimless
-
+from project_gal_AMR import get_2Dkappa_map
 
 
 pixel_num     = 200 # pix for image
@@ -297,8 +297,6 @@ kwlens_part_AS = {"type":"AS","theta_cAS":theta_c_AS}
 kwlens_part_PM = {"type":"PM"}
 from time import time # for DEBUG
 from remade_gal import Gal2kwMXYZ
-from project_gal_alpha import get_rough_radius
-
 
 class LensPart(): 
     def __init__(self,
@@ -462,9 +460,8 @@ class LensPart():
             upload_successful = self.upload_prev()
         if not upload_successful:
             # Read particles ONLY ONCE
-            kw_parts          = Gal2kwMXYZ(self.Gal) # kwargs of Msun,XYZ in kpc (explicitely) centered around Centre of Mass (CM)
-            
-            kwres_proj = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
+            kw_parts         = Gal2kwMXYZ(self.Gal) # kwargs of Msun,XYZ in kpc (explicitely) centered around Centre of Mass (CM)
+            kwres_proj       = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
                             z_source_max=self.z_source_max,sample_z_source=self.sample_z_source,
                             scale_radius=2,
                             arcXkpc=self.arcXkpc,verbose=True,save_res=True,reload=True)
@@ -572,11 +569,10 @@ class LensPart():
         _ra,_dec = _radec
         alpha_x,alpha_y = self.lens_model_PART.alpha(_ra, _dec, self.kwargs_lens_PART)
         alpha_x,alpha_y = util.array2image(alpha_x),util.array2image(alpha_y)
-        self.store()
         return alpha_x,alpha_y
         
-    def _kappa_map(self,_radec=None):
-        # very important! this is kappa only within the radec considered
+    def _kappa_map_from_lens(self,_radec=None,exact=False):
+        # compute analytically from the particles -> actually should not be the way to do it !
         print("Computing kappa map from PM...")
         self.unpack()
         if _radec is None:
@@ -584,7 +580,14 @@ class LensPart():
         _ra,_dec = _radec
         kappa = self.lens_model_PART.kappa(_ra, _dec, self.kwargs_lens_PART)
         kappa = util.array2image(kappa)
-        self.store()
+        return kappa
+    def _kappa_map(self,_radec=None):
+        # compute from density map
+        # actually better bc does not depend on the particle profile
+        print("Computing kappa map from density map...")
+        kw_ext = get_extents(self,self.arcXkpc)
+        kappa = get_2Dkappa_map(Gal=self.Gal,proj_index=self.proj_index,MD_coords=self.MD_coords,kwargs_extents=kw_ext,
+                                SigCrit=self.SigCrit,arcXkpc=self.arcXkpc)
         return kappa
 
     def get_RADEC(self):
@@ -619,12 +622,24 @@ class LensPart():
         print("Note: Taking the average of dalpha_x_dy and dalpha_y_dx for fxy")
         f_xx,f_xy,f_yy  = dalpha_x_dx,(dalpha_x_dy+dalpha_y_dx)/2.,dalpha_y_dy
         return f_xx,f_xy,f_yy
+    # WIP
+    def _hessian_ANL(self,_radec=None):
+        print("Computing lensing PM hessian matrix...")
+        self.unpack()
+        if _radec is None:
+            _radec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
+        _ra,_dec = _radec
+        f_xx, f_xy, f_xy, f_yy = self.lens_model_PART.hessian(_ra, _dec, self.kwargs_lens_PART)
+        f_xx, f_xy, f_yy       = util.array2image(f_xx),util.array2image(f_xy),util.array2image(f_yy)
+        return f_xx, f_xy, f_yy
         
     def get_kw_shear(self):
         f_xx,f_xy,f_yy = self.hessian
         # derived kappa, shear1,shear2 and shear
         """
         # this is not almost equal up to 2 decimal in ~40% of the cases -> investigate
+        # -> might make sense bc the one I was comparing it to was the ANALYTICAL exact kappa
+        # to an approximate one
         kappa  = (f_xx + f_yy)/2.
         np.testing.assert_almost_equal(kappa,self.kappa_map,decimal=2)
         """
@@ -705,7 +720,7 @@ def _plot_caustics(LPClass,
                    lensModelExt,
                    str_model,
                    kwargs_lens,
-                   kw_extent=None,
+                   kw_extents=None,
                    fast_caustic = True,
                    savename="test_caustics.png"):
     raise RuntimeError("To re-implement in a better way")
@@ -742,9 +757,9 @@ def _plot_caustics(LPClass,
     plot_util.plot_line_set(ax[1], _coords, ra_crit_list, dec_crit_list, color='r')
     ax[1].set_title("CL "+str_model)
     """
-    if kw_extent is None:
-        kw_extent = get_extents(LPClass.imageModel,LPClass.arcXkpc) 
-    xmin,xmax,ymin,ymax = kw_extent["extent_arcsec"]
+    if kw_extents is None:
+        kw_extents = get_extents(LPClass.imageModel,LPClass.arcXkpc) 
+    xmin,xmax,ymin,ymax = kw_extents["extent_arcsec"]
     kw_crit = LPClass.critical_curve_caustics()
     cl_rad_x,cl_rad_y   = kw_crit["critical_lines"]["radial"]
     cc_rad_x,cc_rad_y   = kw_crit["caustics"]["radial"]
@@ -755,7 +770,7 @@ def _plot_caustics(LPClass,
     fig,ax = plt.subplots()
     ax.scatter(cc_rad_x,cc_rad_y,c="k",marker=".",label="Radial Caustics")
     ax.scatter(cc_tan_x,cc_tan_y,c="y",marker=".",label="Tangential Caustics")
-    ax.scatter(*cent_caust_tan_PART,c="k",marker="x",label="Tang. Center Caustic")
+    ax.scatter(*cent_caust_tan,c="k",marker="x",label="Tang. Center Caustic")
     ax.set_xlim(xmin,xmax)
     ax.set_ylim(ymin,ymax)
     ax.set_xlabel("RA ['']")
@@ -768,7 +783,7 @@ def _plot_caustics(LPClass,
     plt.savefig(savename)
     plt.close()
     
-def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",skip_show=False):
+def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",kw_extents=None):
     lensModelExt = LensModelExtensions(Model.lens_model_PART)
     kwargs_lens  = Model.kwargs_lens_PART
 
@@ -776,7 +791,7 @@ def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",skip_sh
 
     return _plot_caustics(Model,
                           lensModelExt,str_model,kwargs_lens,
-                          fast_caustic=fast_caustic,savename=savename,skip_show=skip_show)
+                          fast_caustic=fast_caustic,savename=savename,kw_extents=kw_extents)
 
 """
 def get_kappa(Model,plot=True,savename="comp_kappa.png",skip_show=False):

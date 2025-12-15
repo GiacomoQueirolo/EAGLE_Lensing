@@ -77,6 +77,7 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,
     try:
         assert reload
         kw_res = load_whatever(Gal.projection_path)
+        print("Found and loaded projection from :"+Gal.projection_path)
         return kw_res
     except AssertionError:
         pass
@@ -94,7 +95,7 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,
             # iterate density histogram
             kw_parts_proj = project_kw_parts(kw_parts=kw_parts,proj_index=proj_index)
             #kw_parts_proj_arcsec = kwparts2arcsec(kw_parts_proj,arcXkpc)
-            t0 = time()
+            #t0 = time()
             kw_2Ddens = dens_map_AMR(Gal=Gal,
                                       kw_parts_proj=kw_parts_proj,
                                       verbose=verbose)
@@ -472,7 +473,7 @@ def Gal2kw_samples(Gal,proj_index,MD_coords,arcXkpc):
     # RA,DEC= arcsec, Ms = Msun
     #print("Some galaxy have a 'shifted' CM")
     RA_cm,DEC_cm = get_CM(Ms,RAs,DECs)
-    print(f"We recenter around the densest point (MD) obtained iteratively (see iterate_dens_map)") 
+    print(f"We recenter around the densest point (MD) obtained with AMR") 
     RA_MD,DEC_MD = MD_coords.to("kpc")*arcXkpc
     print("Info:  CM vs Densest ")
     print("CM:",np.round(RA_cm,2),np.round(DEC_cm,2))
@@ -486,3 +487,23 @@ def Gal2kw_samples(Gal,proj_index,MD_coords,arcXkpc):
     kw_samples["Ms"]   = Ms    #Msun
     kw_samples["cm"]   = RA_cm-RA_MD,DEC_cm-DEC_MD  # 
     return kw_samples
+
+def get_2Dkappa_map(Gal,proj_index,MD_coords,SigCrit,kwargs_extents,arcXkpc=None):
+    if arcXkpc is None:
+        arcXkpc = Gal.cosmo.arcsec_per_kpc_proper(Gal.z) 
+    kw_samples = Gal2kw_samples(Gal=Gal,proj_index=proj_index,
+                                MD_coords=MD_coords,arcXkpc=arcXkpc)
+    Ms       = kw_samples["Ms"]
+    RAs,DECs = kw_samples["RAs"],kw_samples["DECs"]
+    
+    mass_grid, xedges, yedges   = np.histogram2d(RAs,DECs,
+                                       bins=kwargs_extents["bins_arcsec"],
+                                       weights=Ms,
+                                       density=False) 
+    # mass_grid shape: (nx, ny) -> transpose to (ny, nx) -> given the circular simmetry, doesn't really matter
+    Dra01,Ddec01 = kwargs_extents["DRaDec"]
+    # density_ij = M_ij/(Area_bin_ij)
+    density    = mass_grid.T / (Dra01*Ddec01/(arcXkpc**2)) # Msun/kpc^2
+    kappa = density/SigCrit
+    kappa = kappa.to("").value
+    return kappa
