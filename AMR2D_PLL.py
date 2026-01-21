@@ -64,17 +64,17 @@ def compute_mass(pts, m):
     return acc
 
 @njit
-def needs_refinement(npts, size, density, pmax, min_size, dens_thresh):
-    if npts > pmax and size > min_size:
+def needs_refinement(npts, area, density, pmax, min_area, dens_thresh):
+    if npts > pmax and area > min_area:
         return True
-    #if density > dens_thresh and size > min_size:
+    #if density > dens_thresh and size > min_area:
     #    return True
     return False
 
 def build_AMR(x, y, m, 
               x0, x1, y0, y1, 
               max_particles=200, 
-              min_size=0.01,
+              min_area=0.01,
               dens_thresh=0.0):
 
     # stack of pending cells: (x0,x1,y0,y1,pts)
@@ -85,13 +85,14 @@ def build_AMR(x, y, m,
     while stack:
         x0, x1, y0, y1, pts = stack.pop()
 
-        size = x1 - x0
-        area = size * size
-        mass = compute_mass(pts, m)
+        sizex = x1 - x0
+        sizey = y1 - y0
+        area  = sizex * sizey
+        mass  = compute_mass(pts, m)
         density = mass / area
         
-        if needs_refinement(len(pts), size, density,
-                            max_particles, min_size, dens_thresh):
+        if needs_refinement(len(pts), area, density,
+                            max_particles, min_area, dens_thresh):
 
             c0,c1,c2,c3 = split_indices(x, y, pts, x0, x1, y0, y1)
             """
@@ -110,7 +111,7 @@ def build_AMR(x, y, m,
             """
             for i, child in enumerate((c0, c1, c2, c3)):
                 #if len(child) > 0 and len(child) < len(pts):
-                if len(child) > 0 and (x1 - x0) > min_size:
+                if len(child) > 0 and (x1 - x0)*(y1 - y0) > min_area:
                     xm = 0.5*(x0+x1)
                     ym = 0.5*(y0+y1)
             
@@ -142,7 +143,7 @@ def validate_no_duplicates(cells, N,verbose=False):
          assert("ERROR: Some particles appear multiple times or not at all.")
          #print("Counts:", seen)
     
-def AMR_density_PLL(x, y, m, max_particles=300, min_size=None,dens_thresh=None,Sigma_crit=None):
+def AMR_density_PLL(x, y, m, max_particles=300, min_area=None,dens_thresh=None,Sigma_crit=None):
     # numba strips units; if present, store them and add them a posteriori
     units = False
     try:
@@ -150,7 +151,7 @@ def AMR_density_PLL(x, y, m, max_particles=300, min_size=None,dens_thresh=None,S
         space_unit = x.unit
         x = x.value
         y = y.value
-        min_size = min_size.value
+        min_area = min_area.value
     except:
         space_unit = 1
     try:
@@ -163,9 +164,9 @@ def AMR_density_PLL(x, y, m, max_particles=300, min_size=None,dens_thresh=None,S
     # Domain
     x0, x1 = np.min(x), np.max(x)
     y0, y1 = np.min(y), np.max(y)
-    if min_size is None:
+    if min_area is None:
         domain = (x1-x0)*(y1-y0)
-        min_size = (domain_size / 300)
+        min_area = (domain_size / 300)
     if dens_thresh is None:
         if Sigma_crit is None:
             raise RuntimeError("Provide either density threshold dens_thresh or critical density Sigma_crit")
@@ -173,7 +174,7 @@ def AMR_density_PLL(x, y, m, max_particles=300, min_size=None,dens_thresh=None,S
     cells = build_AMR(x, y, m,
                       x0,x1,y0,y1,
                       max_particles=max_particles,
-                      min_size=min_size,dens_thresh=dens_thresh)
+                      min_area=min_area,dens_thresh=dens_thresh)
     if units:
         ucells = []
         for c in cells:

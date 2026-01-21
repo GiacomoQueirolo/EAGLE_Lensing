@@ -7,14 +7,7 @@ from pyinstrument import Profiler
 if __name__ == "__main__":
     Gal = get_rnd_NG()
     #print("Loading specific gal for debugging")
-    #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_23//Gn3SGn0.pkl")
-    #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_16//Gn2SGn0.pkl") #  16.20.0 is a great one for Einstein Ring
-    #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_18/Gn23SGn0.pkl")
-    #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_23//Gn3SGn0.pkl") -> fails without reason
-
     #Gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_18//Gn5SGn0.pkl")
-
-    # for testing we reload the lensing data 
     profiler = Profiler()
     profiler.start()
     mod_LP = LensPart(Galaxy=Gal,kwlens_part=kwlens_part_AS,

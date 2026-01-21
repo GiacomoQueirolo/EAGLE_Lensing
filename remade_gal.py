@@ -4,14 +4,16 @@
 # -> this should only deal with Galaxy -> projection etc should be done in another file
 import os
 import glob
-import pickle
+import dill
 import numpy as np
 import h5py
 import astropy.units as u
 import matplotlib.pyplot as plt
 from decimal import Decimal
+from functools import cached_property 
 
 from python_tools.tools import mkdir
+from python_tools.get_res import load_whatever
 import astropy.constants as const
 from astropy.cosmology import FlatLambdaCDM
 from get_gal_indexes import get_gals
@@ -25,6 +27,7 @@ min_z        = 0.2
 # max_z is implicitely =3.53
 min_mass     = 5e13 # Sol Mass
 
+sim_lens_path = "/pbs/home/g/gqueirolo/EAGLE/sim_lens/"
 def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),
                         max_z="2",pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
     data  = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,
@@ -157,10 +160,11 @@ class NewGal:
         self.Name   = f"G{Gn}SGn{SGn}" #note this is unique only within the snap
         self.centre = Centre
         self.a,self.h,self.boxsize = self.read_snap_header()
-        self.cosmo   = FlatLambdaCDM(H0=self.h*100, Om0=1-self.h)
+        #self.cosmo   = FlatLambdaCDM(H0=self.h*100, Om0=1-self.h)
         # Define/Create Gal path
         self.set_gal_path() # works
-
+        self.islens_file = f"{self.gal_snap_dir}/{self.Name}_islens.dll"
+        
         # only for DEBUGging you should set it false
         self._read_prev = True
         self.run(self._read_prev)
@@ -199,6 +203,26 @@ class NewGal:
     ########################
     ########################
     
+    @cached_property 
+    def cosmo(self):
+        return FlatLambdaCDM(H0=self.h*100, Om0=1-self.h)
+    
+    # useful check if it is a lens:
+    @property
+    def is_lens(self):
+        # bool if galaxy is a lens
+        try:
+            islens = load_whatever(self.islens_file)["islens"]
+        except FileNotFoundError:
+            # If file is not there, we assume it is as lens
+            islens = True
+        return islens
+        
+    def update_is_lens(self,islens,message=""):
+        islens = {"islens":islens,"message":message}
+        with open(self.islens_file,"wb") as f:
+            dill.dump(islens,f)
+        return 0
 
     def run(self,_read_prev=True):
         upload_successful = False
@@ -434,9 +458,9 @@ class NewGal:
         return 0
     # works
     def get_pkl_path(self):
-        if not getattr(self,"gal_snap_dir",False):
+        if not hasattr(self,"gal_snap_dir"):
            self.gal_path,self.gal_snap_dir = get_gal_path(self,ret_snap_dir=True)
-        if not getattr(self,"pkl_path",False):
+        if not hasattr(self,"pkl_path"):
             self.pkl_path = f"{self.gal_snap_dir}/Gn{self.Gn}SGn{self.SGn}.pkl"
         return self.pkl_path
     def set_gal_path(self):
@@ -453,7 +477,7 @@ class NewGal:
             self.set_gal_path()
         # store this galaxy
         with open(self.pkl_path,"wb") as f:
-            pickle.dump(self,f)
+            dill.dump(self,f)
         print("Saved "+self.pkl_path)
         
 
@@ -479,7 +503,7 @@ def get_rnd_NG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
 
 
 def get_lens_dir(Gal):
-    lens_dir = "sim_lens/"+str(Gal.sim)+"/snap"+str(Gal.snap)+"_G"+str(Gal.Gn)+"."+str(Gal.SGn)+"/"
+    lens_dir = f"{sim_lens_path}/{Gal.sim}/snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}/"
     mkdir(lens_dir)
     Gal.lens_dir = lens_dir
     return lens_dir

@@ -3,7 +3,7 @@
 # this would give me easily the MD and as well we can get the first bin higher than sigma crit in order to get theta_E
 import os
 import glob
-import pickle
+import dill
 import numpy as np
 from time import time
 import matplotlib.pyplot as plt
@@ -12,7 +12,7 @@ import astropy.units as u
 import astropy.constants as const
 from astropy.cosmology import FlatLambdaCDM
 
-from python_tools.tools import mkdir,to_dimless,short_SciNot
+from python_tools.tools import mkdir,to_dimless,ensure_unit,short_SciNot
 
 from remade_gal import get_CM
 # for now keep this and check if still needed
@@ -53,8 +53,16 @@ def kwparts2arcsec(kw_parts,arcXkpc):
     DECs = kw_parts["Ys"]*arcXkpc
     return {"RAs":RAs,"DECs":DECs,"Ms":kw_parts["Ms"]}
 
-def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,
-                    scale_radius=2,
+class ProjectionError(Exception):
+    # very specific error: raise if there is no projection s.t. 
+    def __init__(self, error):
+        self.error   = str(error)
+        self.message = "Projection Error: "+self.error
+        super().__init__(self.message)
+    def __str__(self):
+        return self.message
+        
+def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
                     arcXkpc=None,verbose=True,save_res=True,reload=True):
     # this is going to be the main function:
     # - for each projection:
@@ -89,59 +97,53 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,
     # else compute it
     if arcXkpc is None:
         arcXkpc = Gal.cosmo.arcsec_per_kpc_proper(Gal.z)
+
+    min_thetaE_kpc = min_thetaE/arcXkpc 
+
     while proj_index<3:
         try:
             kw_proj = {"proj_index":proj_index}
-            # iterate density histogram
+            # Project the particles 
             kw_parts_proj = project_kw_parts(kw_parts=kw_parts,proj_index=proj_index)
-            #kw_parts_proj_arcsec = kwparts2arcsec(kw_parts_proj,arcXkpc)
-            #t0 = time()
+            
             kw_2Ddens = dens_map_AMR(Gal=Gal,
                                       kw_parts_proj=kw_parts_proj,
                                       verbose=verbose)
-            """t1 = time()-t0
-            t0 = time()
-            if verbose:
-                print("info:\n",np.round(t1),"seconds for the dens_map_AMR")
-            """
-            kw_z_min = get_min_z_source(Gal=Gal,
+
+            savenameSigmaEnc =Gal.proj_dir+"/Sigma_enc_proj"+str(proj_index)+".png"
+            kw_z_min = get_min_z_source(Gal=Gal,min_thetaE_kpc=min_thetaE_kpc,
                                       kw_2Ddens=kw_2Ddens,
-                                      z_source_max=z_source_max,verbose=verbose)
-            """
-            t2 = time()-t0
-            if verbose:
-                print("info:\n",np.round(t2),"seconds for the get_min_z_source")
-            """
+                                      z_source_max=z_source_max,
+                                      savenameSigmaEnc=savenameSigmaEnc,verbose=verbose)
+            
             # sample z_source
             z_source = sample_z_source(z_source_min = kw_z_min["z_source_min"],z_source_max=z_source_max)
             kw_z_min["z_source"] = z_source
-            # get an estimate of theta_E scaled
-            #radius_kpc = get_rough_radius(Gal.cosmo,Gal.z,z_source,kw_2Ddens["AMR_cells"],kw_2Ddens["MD_coords"],scale=scale_radius,verbose=verbose)
-            #t0 = time()
-            radius = get_rough_radius_PLL(Gal.cosmo,Gal.z,z_source,kw_2Ddens["AMR_cells"],
-                                              kw_2Ddens["MD_coords"],scale=scale_radius,path=Gal.proj_dir)
-            """t3 = time()-t0
-            if verbose:
-                print("info:\n",np.round(t3),"seconds for the get_rough_radius_PLL")
-            """
+            
+            # get an estimate of theta_E 
+            thetaE = get_rough_thetaE_PLL(kw_2Ddens,Gal.cosmo,Gal.z,z_source,path=Gal.proj_dir,plt_Sig=kw_z_min["plt_Sig"])
+            
             del kw_2Ddens["AMR_cells"] 
-            kw_radius = {"radius":radius} 
+            del kw_z_min["plt_Sig"]
+            kw_thetaE = {"thetaE":thetaE} 
                         
-            kw_res  = kw_proj|kw_2Ddens|kw_z_min|kw_radius
+            kw_res  = kw_proj|kw_2Ddens|kw_z_min|kw_thetaE
             break
-        except AttributeError as Ae:
-            print("Projection Error : "+str(Ae))
+        except ProjectionError as PE:
+            print(PE)
             # should only be if the minimum z_source is higher than the maximum z_source
             # try with other proj
             proj_index+=1
     if kw_res is None:
         print("M(gal)",short_SciNot(Gal.M_tot))
         print("z_gal",Gal.z)
-        raise RuntimeError("There is no projection of the galaxy that create a lens given the z_source_max")
+        proj_message = "\nThere is no projection of the galaxy that create a lens given the z_source_max\n"
+        Gal.update_is_lens(islens=False,message=proj_message)
+        raise ProjectionError(proj_message)
     else:
         if save_res:
             with open(Gal.projection_path,"wb") as f:
-                pickle.dump(kw_res,f)
+                dill.dump(kw_res,f)
             print("Saved "+Gal.projection_path)
         return kw_res
 
@@ -150,7 +152,7 @@ from AMR2D_PLL import AMR_density_PLL
 def dens_map_AMR(Gal,
                   kw_parts_proj,
                   max_particles=100,
-                  min_size=0.1*u.kpc,
+                  min_area=0.1*u.kpc*u.kpc,
                   dens_thresh = 0.*u.Msun/(u.kpc**2),
                   verbose=True):
     # returns: kw_2Ddens["MD_value"][u.Msun/(u.kpc**2),1] 
@@ -166,15 +168,15 @@ def dens_map_AMR(Gal,
     y  = np.asarray(Ys.to("kpc").value) #kpc
     m  = np.asarray(Ms.to("solMass").value)  # M_sol
     """
-    #AMR_cells = AMR_density(Xs,Ys,Ms,max_particles=max_particles,min_size=min_size)
+    #AMR_cells = AMR_density(Xs,Ys,Ms,max_particles=max_particles,min_area=min_area)
     # units are stripped by numba - have to "reattach" them "by hand"
-    AMR_cells = AMR_density_PLL(Xs,Ys,Ms, max_particles=max_particles, min_size=min_size,dens_thresh=dens_thresh)
+    AMR_cells = AMR_density_PLL(Xs,Ys,Ms, max_particles=max_particles, min_area=min_area,dens_thresh=dens_thresh)
     """
     print("DEBUG")
     tmp_amr_name = "tmp/del_amr_cells.pkl"
     print("Saving ",tmp_amr_name)
     with open(tmp_amr_name,"wb") as f:
-        pickle.dump(AMR_cells,f)
+        dill.dump(AMR_cells,f)
     """
     #MD_coords_kpc,MD_value = get_MDfromAMRcells(AMR_cells)
     # use parallelised version - faster 
@@ -183,80 +185,92 @@ def dens_map_AMR(Gal,
     kw_2Ddens = {"MD_value":MD_value,"MD_coords":MD_coords,"AMR_cells":AMR_cells}
     return kw_2Ddens
 
-
-def get_min_z_source(Gal,kw_2Ddens,z_source_max,verbose=True):
+from lib_cosmo import SigCrit
+def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,savenameSigmaEnc = "tmp/Sigma_enc.png"):
     # given a projection, return the minimal z_source
     # fails if it can't produce a supercritical lens w. z_source<z_source_max
-    
-    max_dens = kw_2Ddens["MD_value"]
+        
+    dens_at_thetamin = getDensAtRad(kw_2Ddens,min_thetaE_kpc)
+    # add plot Sigma_encl vs theta
+    Sigma_crit_min   = SigCrit(z_lens=Gal.z,z_source=z_source_max,cosmo=Gal.cosmo)
+    r,Sigma_encl     = cells2SigRad(kw_2Ddens)
+    arcXkpc = Gal.cosmo.arcsec_per_kpc_proper(Gal.z)
+    theta = r*arcXkpc
+    Sigma_encl_arc = Sigma_encl/(arcXkpc**2)
+    Sigma_crit_min_arc = Sigma_crit_min/(arcXkpc**2)
+    plt.close()
+    plt.plot(theta,Sigma_encl_arc,color="k")
+    plt.axhline(Sigma_crit_min_arc.value,ls="--",c="r",label=r"$\Sigma_{crit}^{min}=\Sigma_{crit}(z_{source,max}$="+str(z_source_max)+")="+str(short_SciNot(Sigma_crit_min_arc)))
+    min_thetaE = min_thetaE_kpc*arcXkpc
+    plt.axvline(to_dimless(min_thetaE),label=r"$\theta_{min}$="+str(short_SciNot(min_thetaE)),ls="-",c="grey")
+    dens_at_thetamin_arc = dens_at_thetamin/(arcXkpc**2)
+    plt.axhline(to_dimless(dens_at_thetamin_arc),label=r"$\Sigma(\theta_{min})$="+str(short_SciNot(dens_at_thetamin_arc)),ls="--",c="g")
+    if np.any(Sigma_crit_min_arc<Sigma_encl_arc):
+        theta_E_max = theta[np.argmin(np.abs(Sigma_crit_min_arc-Sigma_encl_arc))]
+        plt.axvline(to_dimless(theta_E_max),label=r"$\theta_E(z_{s,max})$="+str(short_SciNot(theta_E_max)),ls="--",c="b")
+    plt.xlabel(r'$\theta$ ["]')
+    plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl_arc.unit)+"]")
+    plt.title(r"$\Sigma_{encl}$")
+    plt.legend()
+    plt.savefig(savenameSigmaEnc)
+    #plt.savefig("tmp/Sigma_enc.png")
+    print("Saving "+savenameSigmaEnc)
+
     # define the z_source_min:        
     z_source_min = _get_min_z_source(cosmo=Gal.cosmo,z_lens=Gal.z,
-                                    max_dens=max_dens,
+                                    thresh_dens=dens_at_thetamin,
                                     z_source_max=z_source_max,verbose=verbose)
     if z_source_min==0:
-        raise AttributeError("Rerun trying different projection")
+        raise ProjectionError("This projection for this galaxy does not lead to a supercritical lens. Rerun trying different projection")
 
-    kw_zs_min = {"z_source_min":z_source_min}
+    kw_zs_min = {"z_source_min":z_source_min,"plt_Sig":plt}
     return kw_zs_min
 
+def getDensAtRad(kw_2Ddens,rad):
+    # get density within radius
+    radii,Sigma_encl = cells2SigRad(kw_2Ddens)
+    rad = ensure_unit(rad,radii.unit)
+    i_r = np.argmin(np.abs(radii-rad))
+    return Sigma_encl[i_r]
+    
 
-def _get_min_z_source(cosmo,z_lens,max_dens,z_source_max,verbose=True):
+def _get_min_z_source(cosmo,z_lens,thresh_dens,z_source_max,verbose=True):
     # the lens has to be supercritical
     # dens>Sigma_crit = (c^2/4PiG D_d(z_lens) ) D_s(z_source)/D_ds(z_lens,z_source)
     # -> D_s(z_source)/D_ds(z_lens,z_source) < 4PiG D_d(z_lens) *dens/c^2
     # D_s(z_source)/D_ds(z_lens,z_source) is not easy to compute analytically, but we can sample it
     if z_lens>z_source_max:
         raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
-        #return 0
-    try:
-        max_dens.value
-    except:
-        # max_dens is already given in Msun/kpc^2
-        max_dens *= u.Msun/(u.kpc**2)
-    assert max_dens.unit==u.Msun/(u.kpc**2)
+        #return 0 
+    thresh_dens  = ensure_unit(thresh_dens,u.Msun/(u.kpc**2))
     
-    max_DsDds = max_dens*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
-    max_DsDds = max_DsDds.to("").value # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
+    thresh_DsDds = thresh_dens*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
+    thresh_DsDds = thresh_DsDds.to("").value # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
 
     min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
     min_DsDds = min_DsDds.to("").value # dimensionless
     
     z_source_range = np.linspace(z_lens+0.1,z_source_max,100) # it's a very smooth funct->
     DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
-    if not min_DsDds<max_DsDds:
+    if not min_DsDds<thresh_DsDds:
         # to do: deal with this kind of output
         if verbose:
             print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
+            plt.close()
             plt.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
             plt.xlabel(r"z$_{\text{source}}$")
-            plt.axhline(max_DsDds,ls="--",c="r",label=r"max(dens)*4$\pi$*G*$D_l$/c$^2$="+str( short_SciNot(max_DsDds)))
+            plt.axhline(thresh_DsDds,ls="--",c="r",label=r"threshold(dens)*4$\pi$*G*$D_l$/c$^2$="+str( short_SciNot(thresh_DsDds)))
             plt.legend()
             name = "tmp/DsDds.pdf"
             plt.savefig(name)
-            print("max density",short_SciNot(max_dens.value))
+            print("threshold density",short_SciNot(thresh_dens.value))
             print("Saved "+name)
         return 0
     else:
-        # Note: successful test means only that there is AT LEAST 1 PIXEL that is supercritical
-        minimise     = np.abs(DsDds-max_DsDds) 
+        # Note: successful test means that the threshold density = Sigmacrit given z_source =z_source_min
+        minimise     = np.abs(DsDds-thresh_DsDds) 
         z_source_min = z_source_range[np.argmin(minimise)]
         return z_source_min
-
-
-def get_MDfromAMRcells(AMR_cells):
-    try:
-        dns_unit = AMR_cells[0].density.unit
-        density = np.array([c.density.value for c in AMR_cells])*dns_unit
-    except:
-        density = np.array([c.density for c in AMR_cells])
-    c_MD      = AMR_cells[np.argmax(density)]
-    MD_coords = (c_MD.x0+c_MD.x1)/2.,(c_MD.y0+c_MD.y1)/2.
-    try:
-        MD_coords = np.array([mdc.value for mdc in MD_coords])*MD_coords[0].unit
-    except:
-        pass
-    MD_value  = np.max(density)
-    return MD_coords,MD_value
     
 def get_MDfromAMRcells_PLL(AMR_cells):
     # for parallelised version
@@ -274,108 +288,27 @@ def get_MDfromAMRcells_PLL(AMR_cells):
     MD_value  = np.max(density)
     return MD_coords,MD_value
 
-def get_rough_radius(cosmo,z_lens,z_source,AMR_cells,MD_coords=None,scale=2,nm_sigmaplot="tmp/Sigma_AMR.png"):
+def get_rough_thetaE_PLL(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR.png",path="tmp/",plt_Sig=None):
     # -> this should only be used for plotting
     # the idea is simple:
     # we want a very approximate idea of the theta_E of the galaxy
     # to do that, we fit a SIS to its particle distribution 
     # basically in 1D, assuming (wrong but we don't care) spherical symmetry
     # then we scale that by the scale (default=2) and that is our aperture
-    if MD_coords is None:
-        MD_coords,_ = get_MDfromAMRcells(AMR_cells)
-
-    Dd      = cosmo.angular_diameter_distance(z_lens).to("Mpc")
-    Ds      = cosmo.angular_diameter_distance(z_source).to("Mpc")
-    Dds     = cosmo.angular_diameter_distance_z1z2(z_lens,z_source).to("Mpc") 
-    
-    return scale*theta_E_from_AMR_densitymap(AMR_cells,MD_coords, **kw_Ddds)
-
-def get_rough_radius_PLL(cosmo,z_lens,z_source,AMR_cells,MD_coords=None,scale=2,nm_sigmaplot="Sigma_AMR.png",path="tmp/"):
-    # -> this should only be used for plotting
-    # the idea is simple:
-    # we want a very approximate idea of the theta_E of the galaxy
-    # to do that, we fit a SIS to its particle distribution 
-    # basically in 1D, assuming (wrong but we don't care) spherical symmetry
-    # then we scale that by the scale (default=2) and that is our aperture
-    if MD_coords is None:
-        MD_coords,_ = get_MDfromAMRcells(AMR_cells)
 
     Dd      = cosmo.angular_diameter_distance(z_lens).to("Mpc")
     Ds      = cosmo.angular_diameter_distance(z_source).to("Mpc")
     Dds     = cosmo.angular_diameter_distance_z1z2(z_lens,z_source).to("Mpc") 
     kw_Ddds = {"Dd":Dd,"Dds":Dds,"Ds":Ds}
-    return scale*theta_E_from_AMR_densitymap_PLL(AMR_cells,MD_coords,nm_sigmaplot=nm_sigmaplot,path=path,**kw_Ddds)
+    return theta_E_from_AMR_densitymap_PLL(kw_2Ddens=kw_2Ddens,nm_sigmaplot=nm_sigmaplot,path=path,plt_Sig=plt_Sig,**kw_Ddds)
 
-
-
-def theta_E_from_AMR_densitymap(AMR_cells,MD_coords, Dd, Ds, Dds,nm_sigmaplot="Sigma.png",path="tmp/"):
-    # Critical density
-    Sigma_crit = (const.c**2 / (4*np.pi*const.G) * (Ds/(Dd*Dds))).to("Msun/kpc^2")
-    # Physical scale of 1 arcsec at Dd
-    arcXkpc = u.rad.to("arcsec")*u.arcsec/Dd.to("kpc") # arcsec/kpc (on the lens plane)
-    xc,yc = MD_coords*arcXkpc #kpc
-    
-    entries = []
-    # Build list of (radius, mass)
-    for c in AMR_cells:
-        dx = .5*(c.x0+c.x1) - xc #kpc
-        dy = .5*(c.y0+c.y1) - yc #kpc
-        r = np.sqrt(dx*dx + dy*dy) #kpc
-        mass = c.mass              #Msun
-        entries.append((r, mass))
-
-    # Sort by radius
-    entries.sort(key=lambda x: x[0])
-
-    # Cumulative sum
-    cumulative_mass = 0.0
-    Sigma_encl = []
-    theta = []
-    for r, m in entries:
-        cumulative_mass += m # Msun
-        Enc_Dens = cumulative_mass/(np.pi*r*r) # Msun/kpc^2 
-        Sigma_encl.append(Enc_Dens.value)
-        t = r*arcXkpc
-        theta.append(t.value)
-    Sigma_encl = np.array(Sigma_encl)*Sigma_encl.unit
-    theta = np.array(theta)*t.unit
-    thetaE = np.interp(Sigma_crit.value, Sigma_encl.value[::-1], theta[::-1].value)*theta.unit
-    """
-    for r, m in entries:
-        cumulative_mass += m # Msun
-        Enc_Dens = cumulative_mass/(np.pi*r*r) # Msun/kpc^2 
-        if Enc_Dens >= Sigma_crit:
-            theta = r*arcXkpc
-            return theta
-    # Threshold not reached
-    return None
-    """
-    print("theta_E_arcsec found",short_SciNot(np.round(thetaE,2)))
-    plt.scatter(theta,Sigma_encl)
-    plt.axhline(Sigma_crit.value,ls="--",c="r",label=r"$\Sigma_{crit}$ ["+str(Sigma_crit.unit)+"]")
-    plt.axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="--",c="k")
-    plt.xlabel(r"$\theta$ ['']")
-    plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl.unit)+"]")
-    plt.title(r"$\Sigma_{encl}$")
-    plt.legend()
-    nm_savefig = path+"/"+nm_sigmaplot
-    print("Saving "+nm_savefig)
-    plt.savefig(nm_savefig)
-    plt.close()
-
-    return thetaE
-
-def theta_E_from_AMR_densitymap_PLL(AMR_cells,MD_coords, Dd, Ds, Dds,nm_sigmaplot="Sigma.png",path="tmp/"):
-    # Critical density
-    Sigma_crit = (const.c**2 / (4*np.pi*const.G) * (Ds/(Dd*Dds))).to("Msun/kpc^2")
-    # Physical scale of 1 arcsec at Dd
-    arcXkpc = u.rad.to("arcsec")*u.arcsec/Dd.to("kpc") # arcsec/kpc (on the lens plane)
-    xc,yc = MD_coords #kpc
+def cells2SigRad(kw_2Ddens):    
+    xc,yc = kw_2Ddens["MD_coords"] #kpc
     # to speed up the code I need to vectorise it -
     # but then I need to ingore the units
-    #x0,x1,y0,y1,mass  = np.array([[c[0].value,c[1].value,c[2].value,c[3].value,c[4].value] for c in AMR_cells]).T
-    x0,x1,y0,y1,mass  = np.array([[cc.value for cc in c[:-1]] for c in AMR_cells]).T
-    x0_unit,x1_unit,y0_unit,y1_unit,mass_unit  = [c.unit for c in AMR_cells[0][:-1]]
+    #x0,x1,y0,y1,mass  = np.array([[c[0].value,c[1].value,c[2].value,c[3].value,c[4].value] for c in kw_2Ddens["AMR_cells"]]).T
+    x0,x1,y0,y1,mass  = np.array([[cc.value for cc in c[:-1]] for c in kw_2Ddens["AMR_cells"]]).T
+    x0_unit,x1_unit,y0_unit,y1_unit,mass_unit  = [c.unit for c in kw_2Ddens["AMR_cells"][0][:-1]]
     # verify that the units are consistent
     assert x0_unit==x1_unit
     assert x0_unit==y0_unit
@@ -397,66 +330,48 @@ def theta_E_from_AMR_densitymap_PLL(AMR_cells,MD_coords, Dd, Ds, Dds,nm_sigmaplo
     dx = xc_cell - xc
     dy = yc_cell - yc
     r = np.sqrt(dx*dx + dy*dy)
+    # area of the pixels
+    area = (x1-x0)*(y1-y0)
     
     # Sort by radius
     idx = np.argsort(r)
     r_sorted = r[idx]
     m_sorted = mass[idx]
-    
+    area_sorted = area[idx] 
     # Cumulative sum
     cumulative_mass = np.cumsum(m_sorted)
+    cumulative_area = np.cumsum(area_sorted)
     
     # Compute enclosed density Sigma(<r)
-    Sigma_encl = cumulative_mass/ (np.pi * r_sorted * r_sorted)
+    Sigma_encl = cumulative_mass/cumulative_area
+    return r_sorted,Sigma_encl
+    
+def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,plt_Sig=None,nm_sigmaplot="Sigma.png",path="tmp/"):
+    # Critical density
+    Sigma_crit = (const.c**2 / (4*np.pi*const.G) * (Ds/(Dd*Dds))).to("Msun/kpc^2")
+    # Physical scale of 1 arcsec at Dd
+    arcXkpc = u.rad.to("arcsec")*u.arcsec/Dd.to("kpc") # arcsec/kpc (on the lens plane)
 
+    r_sorted,Sigma_encl = cells2SigRad(kw_2Ddens)
     # theta
     theta = r_sorted*arcXkpc
 
-    """
-    entries = []    
-    # Build list of (radius, mass)
-    for c in AMR_cells:
-        dx = .5*(c[0]+c[1]) - xc #kpc
-        dy = .5*(c[2]+c[3]) - yc #kpc
-        r = np.sqrt(dx*dx + dy*dy) #kpc
-        mass = c[-2]            #Msun
-        entries.append((r, mass))
-    # Sort by radius
-    entries.sort(key=lambda x: x[0])
-
-    # Cumulative sum
-    cumulative_mass = 0.0
-    Sigma_encl = []
-    theta = []
-    for r, m in entries:
-        cumulative_mass += m # Msun
-        Enc_Dens = cumulative_mass/(np.pi*r*r) # Msun/kpc^2 
-        Sigma_encl.append(Enc_Dens.value)
-        t = r*arcXkpc
-        theta.append(t.value)
-    for r, m in entries:
-        cumulative_mass += m # Msun
-        Enc_Dens = cumulative_mass/(np.pi*r*r) # Msun/kpc^2 
-        if Enc_Dens >= Sigma_crit:
-            theta = r*arcXkpc
-            return theta
-    # Threshold not reached
-    return None
-    Sigma_encl = np.array(Sigma_encl)*Enc_Dens.unit
-    theta = np.array(theta)*t.unit
-    """
     thetaE = np.interp(Sigma_crit.value, Sigma_encl.value[::-1], theta[::-1].value)*theta.unit
     print("theta_E_arcsec found",short_SciNot(np.round(thetaE,2)))
-    plt.scatter(theta,Sigma_encl)
-    plt.axhline(Sigma_crit.value,ls="--",c="r",label=r"$\Sigma_{crit}$ ["+str(Sigma_crit.unit)+"]")
-    plt.axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="--",c="k")
-    plt.xlabel(r"$\theta$ ['']")
-    plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl.unit)+"]")
-    plt.title(r"$\Sigma_{encl}$")
+    if plt_Sig is None:
+        plt.xlabel(r'$\theta$ ["]')
+        plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl.unit)+"]")
+        plt.title(r"$\Sigma_{encl}$")
+        plt.plot(theta,Sigma_encl,c="k")
+    else:
+        plt = plt_Sig
+    plt.axhline(Sigma_crit.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ ["+str(Sigma_crit.unit)+"]")
+    plt.axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="-",c="b")
     plt.legend()
     nm_savefig = path+"/"+nm_sigmaplot
     print("Saving "+nm_savefig)
     plt.savefig(nm_savefig)
+    plt.savefig("tmp/Sig_enc.png")
     plt.close()
     return thetaE
     
@@ -507,3 +422,52 @@ def get_2Dkappa_map(Gal,proj_index,MD_coords,SigCrit,kwargs_extents,arcXkpc=None
     kappa = density/SigCrit
     kappa = kappa.to("").value
     return kappa
+
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.colors import  Normalize
+from matplotlib.cm import ScalarMappable
+
+def plot_amr_cells(kw_2Ddens):
+    fig, ax = plt.subplots(figsize=(8,8))
+    a,b= [],[]
+    
+    xc,yc = kw_2Ddens["MD_coords"] #kpc
+    cells = kw_2Ddens["AMR_cells"]
+    # to speed up the code I need to vectorise it -
+    # but then I need to ingore the units
+    #x0,x1,y0,y1,mass  = np.array([[c[0].value,c[1].value,c[2].value,c[3].value,c[4].value] for c in kw_2Ddens["AMR_cells"]]).T
+    x0,x1,y0,y1,mass,dns  = np.array([[cc.value for cc in c] for c in cells]).T
+    x0_unit,x1_unit,y0_unit,y1_unit,mass_unit,dns_unit  = [c.unit for c in cells[0]]
+    # verify that the units are consistent
+    assert x0_unit==x1_unit
+    assert x0_unit==y0_unit
+    assert x0_unit==y1_unit
+    assert x0_unit==xc.unit
+    assert x0_unit==yc.unit
+    
+    length_unit = x0_unit
+    x0 *=length_unit
+    x1 *=length_unit
+    y0 *=length_unit
+    y1 *=length_unit
+    mass *=mass_unit
+    dns  *=dns_unit
+    
+    vmax,vmin = np.max(dns.value),np.min(dns.value)
+    cmap = plt.get_cmap("hot")
+    norm = Normalize(vmin=vmin, vmax=vmax)
+    _ = [ax.add_patch(patches.Rectangle((x0[i].value,y0[i].value),x1[i].value-x0[i].value,y1[i].value-y0[i].value,fill=True,linewidth=0.5,facecolor=cmap(norm(dns[i].value)))) for i in range(len(cells))]
+    
+    ax.set_xlim(np.min(x0.value),np.max(x0.value))
+    ax.set_ylim(np.min(y0.value),np.max(y0.value))
+    ax.set_aspect("equal")
+    ax.set_xlabel("x ["+str(x0.unit)+"]")
+    ax.set_ylabel("y ["+str(y0.unit)+"]")
+    
+    sm = ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])  # required for colorbar
+    cbar = fig.colorbar(sm, ax=ax)
+    cbar.set_label("Density")
+    return fig,ax

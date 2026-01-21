@@ -1,20 +1,14 @@
-# try to model a lens with point masses for the particles:
-from astropy.cosmology import FlatLambdaCDM
+from remade_gal import get_rnd_NG
+from python_tools.get_res import LoadClass
+#from python_tools.read_fits import load_fits, load_fitshead,get_transf_matrix
+#from python_tools.conversion import get_pixscale
+from Gen_PM_PLL_AMR import LensPart,plot_all,LoadLens
+from Gen_PM_PLL_AMR import kwlens_part_AS,z_source_max,pixel_num
+#from pyinstrument import Profiler
 
-from fnct import std_sim,test_sim
-from get_gal_indexes import get_rnd_gal
+gal = LoadClass("/pbs/home/g/gqueirolo/EAGLE/data/RefL0025N0752//Gals/snap_24/Gn27SGn0.pkl")
+lens = LensPart(Galaxy=gal,kwlens_part=kwlens_part_AS,
+                           z_source_max=z_source_max, 
+                           pixel_num=pixel_num,reload=True,savedir_sim="test_sim_lens_AMR")
+lens.run()
 
-# Sim source:
-#z_source = 2.1
-#default_cosmo= FlatLambdaCDM(H0=70, Om0=0.3)
-Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False)
-"""
-for i in range(10):
-    try:
-        Gal = get_rnd_gal(sim=std_sim,check_prev=False,reuse_previous=False)
-    except AssertionError as e:
-        print(e)
-        Gal = None
-        del Gal
-        pass
-"""
