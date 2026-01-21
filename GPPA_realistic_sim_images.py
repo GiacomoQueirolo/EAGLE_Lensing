@@ -16,19 +16,7 @@ from lenstronomy.ImSim.Numerics.convolution import PixelKernelConvolution
 import lenstronomy.Util.image_util as image_util
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-def wrapper_get_rnd_lens(reload=True):
-    while True:
-        Gal = get_rnd_NG()
-        mod_LP = LensPart(Galaxy=Gal,kwlens_part=kwlens_part_AS,
-                           z_source_max=z_source_max, 
-                           pixel_num=pixel_num,reload=reload,savedir_sim="test_sim_lens_AMR")
-        try:
-            mod_LP.run()
-            break
-        except ProjectionError as PE:
-            print("This galaxy failed: ",PE,"\n","Trying different galaxy")
-            pass
-    return mod_LP
+from Gen_PM_PLL_AMR import  wrapper_get_rnd_lens
 
 def create_realistic_image(lens,
                            exp_time=1500,  #sec. (~<exp_time> for J1433 opt. HST obs )

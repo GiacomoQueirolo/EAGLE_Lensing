@@ -401,7 +401,8 @@ class LensPart():
         self.PMLens = PMLens(self.kwlens_part)
         self.PMLens.setup(self)
         # recover kwargs_lens_PART and lens_model_PART
-        self.setup_lenses() 
+        if not hasattr(self,"lens_model_PART"):
+            self.setup_lenses() 
         # recover imageModel
         self.get_imageModel()
         """ -> the whole imageModel is deleted
@@ -777,10 +778,22 @@ class LensPart():
         cl_tan_x,cl_tan_y = fit_xy_spline(cl_tan_x_noisy,cl_tan_y_noisy)
         
         # fit alpha in 2D
+        # TODO: verify that it is indeed dec0,ra0 and not the other way out ->correct, see TEST
         alpha_x_spline = RectBivariateSpline(dec0,ra0, alpha_x)
         alpha_y_spline = RectBivariateSpline(dec0,ra0, alpha_y)
 
+        """
+        #TEST: Passed
+        i_dec = np.random.choice(np.arange(0,len(dec0)-1))
+        i_ra  = np.random.choice(np.arange(0,len(ra0)-1))
+        # Direct grid value
+        v_grid = alpha_x[i_dec, i_ra]
         
+        # Interpolated value at exact grid point
+        v_spline = alpha_x_spline.ev(dec0[i_dec], ra0[i_ra])
+        
+        print(v_grid, v_spline)
+        """
         cc_rad_x,cc_rad_y   = cl_rad_x-alpha_x_spline.ev(cl_rad_y,cl_rad_x),\
                               cl_rad_y-alpha_y_spline.ev(cl_rad_y,cl_rad_x)
 
@@ -932,6 +945,7 @@ def slow_fit_xy_spline(x,y,u=np.linspace(0, 1, 200)):
     s=s_scale*len(x_ord),per=True)
     xs, ys = splev(u, tck)
     return xs,ys
+    
 # optimised w. CGPT:
 def fit_xy_spline(x, y,
     u=np.linspace(0, 1, 200),
@@ -1183,9 +1197,23 @@ def plot_all(Model,savename_lensed="lensed_im.pdf",savename_kappa="kappa.png",sa
         plot_caustics(Model,fast_caustic=fast_caustic,savename=Model.savedir+"/"+savename_caustics,kw_extents=kw_extents)
     plt.close("all")
     return 0
-# for compatibility reason with previous versions:
+# monkey-patch for compatibility reason with previous versions:
 Lens_PART = LensPart
 
+# get a lens no matter what:
+def wrapper_get_rnd_lens(reload=True):
+    while True:
+        Gal = get_rnd_NG()
+        mod_LP = LensPart(Galaxy=Gal,kwlens_part=kwlens_part_AS,
+                           z_source_max=z_source_max, 
+                           pixel_num=pixel_num,reload=reload,savedir_sim="test_sim_lens_AMR")
+        try:
+            mod_LP.run()
+            break
+        except ProjectionError as PE:
+            print("This galaxy failed: ",PE,"\n","Trying different galaxy")
+            pass
+    return mod_LP
 
 
 if __name__ == "__main__":

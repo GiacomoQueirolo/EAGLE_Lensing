@@ -213,6 +213,7 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     plt.title(r"$\Sigma_{encl}$")
     plt.legend()
     plt.savefig(savenameSigmaEnc)
+    plt.close()
     #plt.savefig("tmp/Sigma_enc.png")
     print("Saving "+savenameSigmaEnc)
 
