@@ -1,24 +1,26 @@
-# copied from tmp_print_xyz, we want to 
-# obtain a new gal class that works
+"""
+Define the Galaxy Class (storing all particle data), as well as related helper functions, e.g. to sample galaxies 
+"""
 
-# -> this should only deal with Galaxy -> projection etc should be done in another file
 import os
 import glob
 import dill
-import numpy as np
 import h5py
+import numpy as np
 import astropy.units as u
-import matplotlib.pyplot as plt
 from decimal import Decimal
+import matplotlib.pyplot as plt
+import astropy.constants as const
 from functools import cached_property 
 
 from python_tools.tools import mkdir
+from python_tools.get_res import LoadClass
 from python_tools.get_res import load_whatever
-import astropy.constants as const
 from astropy.cosmology import FlatLambdaCDM
 from get_gal_indexes import get_gals
+
 from fnct import _count_part,_mass_part,get_gal_path
-from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header_simple
+from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header
 
 # combination btw get_rnd_gal and _get_rnd_gal
 z_source_max = 4
@@ -26,10 +28,11 @@ verbose      = True
 min_z        = 0.2
 # max_z is implicitely =3.53
 min_mass     = 5e13 # Sol Mass
-
-sim_lens_path = "/pbs/home/g/gqueirolo/EAGLE/sim_lens/"
 def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),
                         max_z="2",pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
+    min_mass = str(min_mass)
+    min_z    = str(min_z)
+    max_z    = str(max_z)
     data  = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,
                      pkl_name=pkl_name,check_prev=check_prev,plot=False,save_pkl=save_pkl)
     index = np.arange(len(data["z"]))
@@ -281,16 +284,9 @@ class NewGal:
             
     
     def prop2comov(self,varType):
+        """Proper coordinate/mass to comoving
+        physically motivated 
         """
-        # copied from fnct
-        aexp = self.aexp[varType]
-        # physically motivated verification 
-        if varType=="Coordinates":
-            self.verbose_assert_almost_equal(aexp,1)
-        elif varType=="Mass":
-            self.verbose_assert_almost_equal(aexp,0)
-        """
-        # physically motivated 
         if varType=="Coordinates":
             aexp = 1
         elif varType=="Mass":
@@ -298,7 +294,7 @@ class NewGal:
         return  1/(self.a**aexp)
 
     def read_snap_header(self):
-        return read_snap_header_simple(z=self.z,snap=self.snap,sim=self.sim)
+        return read_snap_header(z=self.z,snap=self.snap,sim=self.sim)
 
     def _init_path_snap(self):
         z_str          = prepend_str(str(int(self.z)),ln_str=3,fill="0")
@@ -479,11 +475,8 @@ class NewGal:
         with open(self.pkl_path,"wb") as f:
             dill.dump(self,f)
         print("Saved "+self.pkl_path)
-        
 
-        
 # this function is a wrapper for convenience - it takes the class itself as input
-from python_tools.get_res import LoadClass
 def ReadGal(GAL,vebose=True):
     return LoadClass(path=GAL.pkl_path,verbose=verbose)
 
@@ -495,18 +488,8 @@ def get_rnd_NG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
     M        = kw_gal["M"] 
     Gn,SGn   = kw_gal["Gn"],kw_gal["SGn"]
     Centre   = np.array([kw_gal["CMx"],kw_gal["CMy"],kw_gal["CMz"]])  
-    #DEBUG
-    #print("Gn,SGn,M,Centre,z")
-    #print(Gn,SGn,M,Centre,z)
     NG       = NewGal(Gn,SGn,M,Centre,std_sim,z)
     return NG
-
-
-def get_lens_dir(Gal):
-    lens_dir = f"{sim_lens_path}/{Gal.sim}/snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}/"
-    mkdir(lens_dir)
-    Gal.lens_dir = lens_dir
-    return lens_dir
 
 
 

@@ -1,0 +1,203 @@
+#
+# Particle functions
+#
+
+import numpy as np
+import astropy.units as u
+import astropy.constants as const
+
+from lenstronomy.LensModel.lens_model import LensModel
+
+from python_tools.tools import short_SciNot
+# default params:
+theta_c_AS     = 5e-3 
+default_kwlens_part_AS = {"type":"AS","theta_cAS":theta_c_AS}
+default_kwlens_part_PM = {"type":"PM"}
+#
+# cosmo from https://academic.oup.com/mnras/article/474/3/3391/4644836, Agnello 2017
+# point mass theta_E (from eq.4.7 of Meneghetti's lecture note - and by memory)
+# theta_E = \sqrt ( 4GM D_ls / (c^2 Ds Dl) )
+# divide the computation such that it's done only once
+def thetaE_PM_prefact(z_lens,z_source,cosmo):    
+    cosmo_ds  = cosmo.angular_diameter_distance(z_source)
+    cosmo_dd  = cosmo.angular_diameter_distance(z_lens)
+    cosmo_dds = cosmo.angular_diameter_distance_z1z2(z1=z_lens,z2=z_source)
+    pref      = 4*const.G*cosmo_dds/(const.c*const.c*cosmo_ds*cosmo_dd)
+    return np.sqrt(pref) # 
+
+@u.quantity_input
+def thetaE_PM(M:u.g,theta_pref:u.g**-.5):
+    thetaE_rad = np.sqrt(M)*theta_pref
+    thetaE     = thetaE_rad.to("")*u.rad.to("arcsec")
+    return thetaE.value #in arcsec
+# ARCSINH thetaE is actually the same as PM
+def thetaE_AS_prefact(z_lens,z_source,cosmo):    
+    # is actually the same of PM, but it could be in principle different
+    return thetaE_PM_prefact(z_lens,z_source,cosmo)
+@u.quantity_input
+def thetaE_AS(M:u.g,theta_pref:u.g**-.5):
+    # is actually the same of PM, but it could be in principle different
+    return thetaE_PM(M,theta_pref)
+"""
+# maybe useful funct:
+def MfromtE(tE,theta_pref:u.g**-.5):
+    tErad  = tE*u.arcsec.to("rad")
+    M = (tErad/theta_pref)**2
+    return M.to("Msun")
+"""
+def _build_kwargs_lens_AS(args):
+        tE,tCAS, ra, dec = args
+        return {
+            "theta_E": tE,
+            "theta_c": tCAS,
+            "center_x": ra,
+            "center_y": dec
+        }
+        
+def _build_kwargs_lens_PM(args):
+        tE, ra, dec = args
+        return {
+            "theta_E": tE,
+            "center_x": ra,
+            "center_y": dec
+        }
+
+
+# From EAGLE simulation
+
+# Helper funct - create the kwargs_lens given the part. parameters, ie theta_E,x,y,(core if needed) 
+# and the lens_model
+#
+def get_lens_model_PM(thetaEs,samples):
+    kwargs_lens_PM  = [_build_kwargs_lens_PM((thetaEs, samples[0],samples[1]))]
+    lens_model_list = ["POINT_MASS_PARALL"]
+    lens_model_PM   = LensModel(lens_model_list=lens_model_list)
+    return kwargs_lens_PM,lens_model_PM 
+
+def get_lens_model_AS(theta_cAS,thetaEs,samples):
+    try:
+        len(theta_cAS)
+    except TypeError:
+        theta_cAS *= np.ones_like(thetaEs)
+    kwargs_lens_AS = [_build_kwargs_lens_AS((thetaEs,theta_cAS, samples[0],samples[1]))]
+    lens_model_list = ["ARSINH_PARALL"]
+    lens_model_AS   = LensModel(lens_model_list=lens_model_list)
+    return kwargs_lens_AS,lens_model_AS
+    
+#
+# Particle functions
+# -> not needed anymore due to structural changes
+    
+"""
+def get_kwrg_PM(samples,Ms,
+                    z_lens,z_source,
+                    theta_E):     
+    theta_pref = thetaE_PM_prefact(z_lens=z_lens,z_source=z_source)
+    thetaEs    = thetaE_PM(M=Ms,theta_pref = theta_pref)
+
+    kwargs_lens_PM,lens_model_PM = get_lens_model_PM(thetaEs,samples)
+    return {"kwargs_lens_PART":kwargs_lens_PM,"lens_model_PART":lens_model_PM}
+                
+def get_kwrg_AS(samples,Ms,theta_cAS
+                    z_lens,z_source,
+                    theta_E):
+                    
+    theta_pref = thetaE_AS_prefact(z_lens=z_lens,z_source=z_source)
+    thetaEs    = thetaE_AS(M=Ms,theta_pref=theta_pref)
+ 
+    kwargs_lens_AS,lens_model_AS = get_lens_model_AS(theta_cAS,thetaEs,samples)
+
+    return {"kwargs_lens_PART":kwargs_lens_AS,"lens_model_PART":lens_model_AS}
+"""
+#
+# naming functions
+#
+
+def _get_tcAS_str(kwargs_lens):
+
+    return tcAS_str 
+    
+def get_name_PM(kw_lens=None):
+    """Get the name for Point Mass lenses
+    """
+    return f"PM"
+def get_name_AS(kwargs_lens):
+    """Get the name for Arsinh particle lenses
+    """
+    try:
+        tcAS = kwargs_lens["theta_cAS"].value
+    except AttributeError:
+    tcAS = kwargs_lens["theta_cAS"]
+    tcAS_str = short_SciNot(tcAS)
+    tcAS_str   = _get_tcAS_str(kwargs_lens)
+    return f"AS_tc{tcAS_str}"
+
+# Lens modelling 
+#################
+
+#
+# Class wrapper for Particle Lens computation
+#
+class PMLens():
+    def __init__(self,kwargs_lens_part):
+        self.kwargs_lens = kwargs_lens_part
+        type_part = kwargs_lens_part["type"]
+        self.name = type_part
+        
+        if type_part=="PM":
+            self.thetaE_prefact = thetaE_PM_prefact
+            self.thetaE         = thetaE_PM
+            self.get_lens_model = get_lens_model_PM
+
+        elif type_part=="ARCSINH" or type_part=="AS":
+            self.thetaE_prefact = thetaE_AS_prefact
+            self.thetaE         = thetaE_AS
+            self.get_lens_model = get_lens_model_AS 
+        else:
+            raise TypeError("This particle model is not known: "+type_part)
+
+    
+    def setup(self,Mod):
+        """Define cosmological parameters from the lens model
+        """
+         self.z_lens   = Mod.z_lens
+         self.z_source = Mod.z_source
+         self.cosmo    = Mod.cosmo
+                                          
+    def get_lens_PART(self,samples,Ms):
+        """From the sample of particles (position and masses) return their model and parameters
+        in lenstronomy format.
+        """
+        theta_pref = self.thetaE_prefact(z_lens=self.z_lens,z_source=self.z_source,cosmo=self.cosmo)
+        thetaEs    = self.thetaE(M=Ms,theta_pref = theta_pref)
+        kw_lns_mod = {}
+        if self.name =="ARSINH"  or self.name =="AS":
+            kw_lns_mod = {"theta_cAS":self.kwargs_lens["theta_cAS"]}
+        kwargs_lens_PART,lens_model_PART = self.get_lens_model(thetaEs=thetaEs,samples=samples,**kw_lns_mod)
+        return kwargs_lens_PART,lens_model_PART
+
+    
+    ### Class Structure ####
+    ########################
+    def _identity(self):
+        """Returns tuple to identify uniquely this galaxy
+        convert kwargs in immuatable tuple to be hashable"""
+        Id = (self.name,
+              tuple(sorted(self.kwargs_lens.items())))
+        return Id
+    
+    def __hash__(self):
+        """simplify the hash method"""
+        return hash(self._identity())
+
+    def __eq__(self, other):
+        if not isinstance(other, PMLens):
+            return NotImplemented
+        return self._identity() == other._identity()
+
+    def __str__(self):
+        if not getattr(self,"name",False):
+            self._setup_names()
+        return self.name
+########################
+########################

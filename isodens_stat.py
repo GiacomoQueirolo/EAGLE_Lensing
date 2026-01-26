@@ -59,7 +59,7 @@ if __name__=="__main__":
         dxarc = dx*to_dimless(lens.deltaPix) #arcsec
         x0    = dxarc/to_dimless(lens.thetaE) # dimless
         
-        dy    = (isolist.y0[1:]-geom.x0) #pix
+        dy    = (isolist.y0[1:]-geom.y0) #pix
         y0    = to_dimless(dy*lens.deltaPix/lens.thetaE) #dimless
 
         bxdk   = isolist.b4[1:] # boxy-diskyness
@@ -104,7 +104,7 @@ if __name__=="__main__":
             ax.set_title(r"Drift$_y$ = (Center$_y$-Cnt[0]$_y$)/$\theta_E$)")
         
         ax = axis[5][0]
-        ax.plot(th_nrm,bxdk,alpha=.3,color="grey",ls="-")
+        ax.plot(th_nrm,f_bxdk,alpha=.3,color="grey",ls="-")
         if i==0:
             ax.set_xlabel(r'Semimajor axis in arcsec /$\theta_E$ []')
             ax.set_ylabel(r"b4/b4($\theta_E$) []")
@@ -113,7 +113,7 @@ if __name__=="__main__":
     
     # define limits to ignore outliers
     
-    n_bins = 20
+    n_bins = 30
     ax = axis[0][1]
     ax.hist(gamma_distr,bins=n_bins)
     med_gamma = np.median(gamma_distr)
@@ -136,6 +136,7 @@ if __name__=="__main__":
     ax.axvline(med_dpa,ls="--",c="r",label=r"median(D P.A.)="+str(np.round(med_dpa,2))+" ["+str(len(gamma_distr))+" lenses]")
     ax.set_xlabel(r"P.A. - P.A.($\theta_E$)")
     ax.set_title(r"Distr. Pointing Angle - PA$(\theta_E)$")
+    ax.legend()
 
     ax = axis[3][1]
     ax.hist(drift_x,bins=n_bins)
@@ -157,7 +158,7 @@ if __name__=="__main__":
     #med_bd,std_bd = np.median(bxdk_distr),np.std(bxdk_distr)
     #axis[3][0].set_ylim(np.max(med_bd-3*std_bd,np.min(bxdk_distr)),np.min(med_bd+3*std_bd,np.max(bxdk_distr)))
     # Arbitrary by hand for simplicity
-    axis[3][0].set_ylim(-.1,0.5)
+    #axis[5][0].set_ylim(-.1,0.5)
 
     ax.hist(f_bxdk_distr,bins=n_bins)
     med_fb4 = np.median(f_bxdk_distr)

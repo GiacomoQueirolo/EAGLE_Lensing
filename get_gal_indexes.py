@@ -4,19 +4,19 @@
 # - coordinates
 # - mass
 # - redshift
-# - Group and Subgroup (not really useful but anyway)
-import numpy as np
-import matplotlib.pyplot as plt
+# - Group and Subgroup
 import pickle
 import os,copy
+import numpy as np
+import matplotlib.pyplot as plt
 
-from python_tools.get_res import load_whatever
-from sql_connect import exec_query
 from fnct import std_sim,gal_dir
+from sql_connect import exec_query
+from python_tools.get_res import load_whatever
 
 def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl_name="massive_gals.pkl",plot=True,check_prev=True):
     pkl_path = f"{gal_dir}/{pkl_name}" 
-     # select higher masses bc 1) lenses 2) else we have too many points
+    # select higher masses bc 1) lenses 2) else we have too many points
     myQuery = "SELECT \
         gal.GroupNumber as Gn, \
         gal.SubGroupNumber as SGn, \
@@ -35,17 +35,16 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl
     
     # NOTE: center of mass is in comoving coord.(cMpc)
     # Execute
-    #print("DEBUG - check that the pickling doesn't mess w. the data")
     check_prev = False
-    save_pkl = False
+    save_pkl  = False
     if check_prev:
         try:
             myData = load_whatever(pkl_path)
             #formatting might be slightly diff.
             if myData["query"].replace(" ","") != myQuery.replace(" ",""):
                 raise UserWarning("Loaded previous results doesn't have the same query - rerunning and overwriting")
-        except:
-            print("Tried and failed to load previous results :"+pkl_path+"\nRerunning SQL query")
+        except Exception as e:
+            print("Tried and failed to load previous results :"+pkl_path+"\nBecause of "+e+"\nRerunning SQL query")
             check_prev = False
     if not check_prev:
         myData = exec_query(myQuery)

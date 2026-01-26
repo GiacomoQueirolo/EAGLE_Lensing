@@ -2,8 +2,9 @@ import glob
 import h5py
 import pickle
 import numpy as np
+
 from python_tools.get_res import load_whatever
-from python_tools.tools import mkdir
+from python_tools.tools import mkdir,to_dimless
 ####
 
 # Setup and General Structure
@@ -18,9 +19,8 @@ from python_tools.tools import mkdir
 # data path
 part_data_path = "/pbs/home/g/gqueirolo/EAGLE/data/"
 # "Standard" simulation
-# use the following only as test case
-#std_sim  = "RefL0012N0188"
 std_sim  = "RefL0025N0752"
+# use the following simulation only as test case
 test_sim = "RefL0012N0188"
 sim_path = part_data_path+std_sim+"/"
 # Where to store the galaxies
@@ -44,8 +44,6 @@ def get_z(snap):
     snap = str(snap).lstrip("0")
     if snap=="":
         snap="0"
-    #while snap[0]=="0" and snap!="0":
-    #    snap = snap[1:]
     return kw_snap_z[snap]
 
 def get_snap(z,_ln_snap=None):
@@ -57,6 +55,8 @@ def get_snap(z,_ln_snap=None):
     return snap
 
 def get_z_snap(z=None,snap=None):
+    """Given either z or snap, return both
+    """
     if z is None and snap is None:
         raise UserWarning("Give either z or snap")
     if z is None:
@@ -66,7 +66,8 @@ def get_z_snap(z=None,snap=None):
     return z,snap
     
 def prepend_str(str_i,ln_str,fill="0"):
-    # should rather be done with f"{string:04}" or similar
+    """Prepend 'fill' to 'str_i' until it reaches the lenght 'ln_str'
+    """
     if ln_str is None:
         return str_i
     str_i = str(str_i)
@@ -112,39 +113,23 @@ def get_files(sim,z=None,snap=None,_i_="*"):
     file_string = prefix+fix+suffix
     files = glob.glob(file_string)
     # checking that the files are not empty
-    try:
-        assert files != []
-    except:
-        print("#DEBUG")
-        print(file_string)
-        print("If snap==17, might be bc that snap was not downloaded fsr - and we fail to do so")
+    assert files != []
     return files
 
 
-
-def read_snap_header_simple(z=None,snap=None,sim=std_sim):
-    """ Read various attributes from the header group.  -> simplified"""
+def read_snap_header(z=None,snap=None,sim=std_sim):
+    """Read various attributes from the header group. 
+    """
     file    = get_files(sim,z,snap,_i_=0)
-    #print("#DEBUG")
-    #print(sim,z,snap)
     if len(file)!=1:
-        raise RuntimeError("Warning: define only one snapshot")
         print("file=",file)
+        raise RuntimeError("Warning: define only one snapshot")
     file      = file[0]
     aexp,hexp = {},{}
     with h5py.File(file, 'r') as f:
         a       = f['Header'].attrs.get('Time')                # Scale factor.
         h       = f['Header'].attrs.get('HubbleParam')         # h = H0/(100km/s/Mpc)
         boxsize = f['Header'].attrs.get('BoxSize')             # L [cMph/h].
-        """
-        # aexp and hexp are different for the diff. variable (mainly coord and mass)
-        # but should be the same between different type of particles and redshift bins
-        atts = "GroupNumber","SubGroupNumber","Mass","Coordinates","SmoothingLength"
-        for att in atts:
-            aexp[att] = f[f"PartType0/{att}"].attrs["aexp-scale-exponent"]  # Exponent of Scale factor.
-            hexp[att] = f[f"PartType0/{att}"].attrs["h-scale-exponent"]     # Exponent of h
-    #return a,aexp,h,hexp,boxsize
-    """
     return a,h,boxsize
 
 def _count_part(part):
@@ -155,6 +140,8 @@ def _mass_part(part):
 
 
 def get_gal_path(Gal,ret_snap_dir=False):
+    """Extract the path of the galaxy and the snap subdirectory
+    """
     try:
         gal_path,gal_snap_dir =  Gal.gal_path,Gal.gal_snap_dir
     except:
@@ -165,25 +152,21 @@ def get_gal_path(Gal,ret_snap_dir=False):
     return gal_path
 
 ################################
+
 def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0,pa=0,q=1,Re=5.0):
-    # x,y : N,M grid of coordinates
-    # n : Sersic index
-    # I : amplitude
-    # cntx,cnty : center coordinates
-    # pa: pointing angle
-    # q : axis ratio
-    try:
-        # ugly but useful
-        x=x.value
-        y=y.value
-    except:
-        pass
-    try:
-        # ugly but useful
-        cntx=cntx.value
-        cnty=cnty.value
-    except:
-        pass
+    """
+     x,y : N,M grid of coordinates
+     n : Sersic index
+     I : amplitude
+     cntx,cnty : center coordinates
+     pa: pointing angle (in angles)
+     q : axis ratio
+    """
+    x    = to_dimless(x)
+    cntx = to_dimless(cntx)
+    y    = to_dimless(y)
+    cnty = to_dimless(cnty)
+    
     if q==1:
         # for some reason pa has effects even if q is 1 
         pa=0
@@ -203,7 +186,8 @@ def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0,pa=0,q=1,Re=5.0):
 class Sersic():
     # useful to lens an image:
     def __init__(self,I=10,cntx=0,cnty=0,pa=0,q=1,n=4):
-        raise RuntimeError("Something is off w. the centering when considering ellipticity. Use lenstronomy 'lenstronomy.LightModel.Profiles.sersic import SersicElliptic' for example")
+        raise DeprecationWarning("Something is off w. the centering when considering ellipticity. \
+        Use lenstronomy 'lenstronomy.LightModel.Profiles.sersic import SersicElliptic' for example")
         self.cntx = cntx
         self.cnty = cnty
         self.pa   = pa
