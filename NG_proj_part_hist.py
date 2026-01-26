@@ -16,9 +16,7 @@ from astropy import constants as const
 
 from lenstronomy.LensModel import convergence_integrals
 
-from remade_gal import get_rnd_NG
-from remade_gal import get_z_source,get_dP #,get_radius
-#from get_gal_indexes import get_rnd_gal
+from ParticleGalaxy import get_rnd_PG,get_z_source,get_dP
 
 from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
@@ -317,7 +315,7 @@ if __name__=="__main__":
     if rerun:
         #print("DEBUG -- USING test sym")
         #Gal = get_rnd_gal(sim=test_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
-        Gal = get_rnd_NG()#sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
+        Gal = get_rnd_PG()#sim=std_sim,check_prev=False,reuse_previous=False,min_mass="1e13",max_z="1")
         Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
         mkdir(Gal.proj_dir)
         Gal.dens_res = f"{Gal.proj_dir}/dens_res.pkl"
@@ -332,7 +330,7 @@ if __name__=="__main__":
         Gal.dens_res = dens_res
         Gal.proj_dir = get_dir_basename(dens_res)[0]
     """    
-    Gal    = get_rnd_NG()
+    Gal    = get_rnd_PG()
     z_lens = Gal.z
     """
     print("DEBUG")

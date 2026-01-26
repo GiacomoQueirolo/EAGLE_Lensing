@@ -1,5 +1,4 @@
 # copied and adapted from test_Gen_PM_PLL_AMR.py
-from remade_gal import get_rnd_NG
 from python_tools.get_res import LoadClass
 from python_tools.read_fits import load_fits, load_fitshead,get_transf_matrix
 from python_tools.conversion import get_pixscale

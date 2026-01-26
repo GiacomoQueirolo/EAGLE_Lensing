@@ -14,7 +14,7 @@ from astropy.cosmology import FlatLambdaCDM
 
 from python_tools.tools import mkdir,to_dimless,ensure_unit,short_SciNot
 
-from remade_gal import get_CM
+from ParticleGalaxy import Gal2kwMXYZ,get_CM
 # for now keep this and check if still needed
 dir_name     = "proj_part_hist"
 def prep_Gal_projpath(Gal,dir_name=dir_name):
@@ -376,7 +376,6 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,plt_Sig=None,nm_sigma
     plt.close()
     return thetaE
     
-from remade_gal import Gal2kwMXYZ,get_CM
 def Gal2MRADEC(Gal,proj_index,arcXkpc):
     kw_parts = Gal2kwMXYZ(Gal)
     Xs,Ys    = proj_parts(kw_parts,proj_index)

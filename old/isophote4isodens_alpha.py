@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from photutils.isophote import Ellipse, EllipseGeometry, build_ellipse_model
 
-from Gen_PM_PLL import LoadLens #LensPart,kwlens_part_AS,cutoff_radius,z_source_max,pixel_num
+from Gen_PM_PLL_alpha import LoadLens #LensPart,kwlens_part_AS,cutoff_radius,z_source_max,pixel_num
 from python_tools.get_res import LoadClass
 from ParticleGalaxy import Gal2kwMXYZ 
 from project_gal  import proj_parts,findDens,get_densmap,xyminmax
@@ -26,28 +26,19 @@ from project_gal  import proj_parts,findDens,get_densmap,xyminmax
 from scipy.optimize import curve_fit
 
 # temp : 
-from Gen_PM_PLL import LensPart,PMLens,thetaE_AS_prefact,thetaE_AS,get_lens_model_AS
+from Gen_PM_PLL_alpha import LensPart,PMLens,thetaE_AS_prefact,thetaE_AS,get_lens_model_AS
 
 def linlaw(x, a, b) :
     return a + x * b
 
 
-def get_kwisodens(Lens,cutoff_rad=None,pixel_num=None,verbose=True):
+def get_kwisodens(Lens,verbose=True):
     kw_parts = Gal2kwMXYZ(Lens.Gal)
-    # cutoff_radius_dens is used to have a first (quite alright)
-    # estimate of the densest point
-    if cutoff_rad is None:
-        cutoff_rad = Lens.cutoff_radius
-    if pixel_num is None:
-        pixel_num  = Lens.pixel_num # here in case I need to change it
-    density = get_densmap(kw_parts,Lens.proj_index,pixel_num=pixel_num,
-                          cutoff_radius=cutoff_rad,
-                          cutoff_radius_dens=100*u.kpc,verbose=verbose)
-    kappa = (density/Lens.SigCrit).value
-    
+    # kappa map is as of now, the same resolution as the alpha map -> could be recomputed taking _kappa_map(x,y)
+    kappa = Lens.kappa_map
     
     # x0, y0, sma(semimajor), eps(ellipticity=1-b/a), pa
-    geom = EllipseGeometry(kappa.shape[0], kappa.shape[1], 10., 0.5, 0./180.*np.pi)
+    geom = EllipseGeometry(kappa.shape[0]/2., kappa.shape[1]/2., 10., 0.5, 0./180.*np.pi)
     geom.find_center(kappa)
     ellipse = Ellipse(kappa, geometry=geom)
     isolist = ellipse.fit_image()

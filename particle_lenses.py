@@ -8,7 +8,7 @@ import astropy.constants as const
 
 from lenstronomy.LensModel.lens_model import LensModel
 
-from python_tools.tools import short_SciNot
+from python_tools.tools import short_SciNot,to_dimless
 # default params:
 theta_c_AS     = 5e-3 
 default_kwlens_part_AS = {"type":"AS","theta_cAS":theta_c_AS}
@@ -121,15 +121,13 @@ def get_name_PM(kw_lens=None):
     """Get the name for Point Mass lenses
     """
     return f"PM"
+    
 def get_name_AS(kwargs_lens):
     """Get the name for Arsinh particle lenses
     """
-    try:
-        tcAS = kwargs_lens["theta_cAS"].value
-    except AttributeError:
-    tcAS = kwargs_lens["theta_cAS"]
+    tcAS     = to_dimless(kwargs_lens["theta_cAS"])
     tcAS_str = short_SciNot(tcAS)
-    tcAS_str   = _get_tcAS_str(kwargs_lens)
+    tcAS_str = _get_tcAS_str(kwargs_lens)
     return f"AS_tc{tcAS_str}"
 
 # Lens modelling 
@@ -160,9 +158,9 @@ class PMLens():
     def setup(self,Mod):
         """Define cosmological parameters from the lens model
         """
-         self.z_lens   = Mod.z_lens
-         self.z_source = Mod.z_source
-         self.cosmo    = Mod.cosmo
+        self.z_lens   = Mod.z_lens
+        self.z_source = Mod.z_source
+        self.cosmo    = Mod.cosmo
                                           
     def get_lens_PART(self,samples,Ms):
         """From the sample of particles (position and masses) return their model and parameters

@@ -7,7 +7,6 @@ from lenstronomy.LensModel.lens_model import LensModel
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from fnct import std_sim
-from remade_gal import sim_lens_path
 from Gen_PM_PLL_AMR import LoadLens,get_extents
 from isophote4isodens_AMR import get_kwisodens
 

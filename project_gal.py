@@ -14,7 +14,8 @@ from astropy.cosmology import FlatLambdaCDM
 
 from python_tools.tools import mkdir,to_dimless,short_SciNot
 
-from remade_gal import get_CM
+from ParticleGalaxy import get_CM,Gal2kwMXYZ
+
 # for now keep this and check if still needed
 dir_name     = "proj_part_hist"
 def prep_Gal_projpath(Gal,dir_name=dir_name):
@@ -390,7 +391,6 @@ def _get_Sigma_encl(thetas,Ms,r_max,nbins):
     Sigma_encl      = M_encl / area # Msun/arcsec^2
     return Sigma_encl,theta_mid
 
-from remade_gal import Gal2kwMXYZ
 def Gal2MRADEC(Gal,proj_index,arcXkpc):
     kw_parts = Gal2kwMXYZ(Gal)
     Xs,Ys    = proj_parts(kw_parts,proj_index)

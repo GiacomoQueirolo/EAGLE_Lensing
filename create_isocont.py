@@ -23,8 +23,7 @@ from lenstronomy.LensModel import convergence_integrals
 #from lenstronomy.Util import util
 
 from fnct import gal_dir,std_sim
-#from get_gal_indexes import get_rnd_gal
-from remade_gal import get_rnd_NG
+from ParticleGalaxy import get_rnd_PG
 
 from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
@@ -37,7 +36,7 @@ verbose      = True
 
 from Gen_PM_PLL import     cutoff_radius 
 
-from remade_gal import get_z_source,get_dP,Gal2kwMXYZ #get_radius
+from ParticleGalaxy import get_z_source,get_dP,Gal2kwMXYZ #get_radius
 
 from project_gal  import proj_parts,findDens,get_densmap,xyminmax
 
@@ -245,7 +244,7 @@ if __name__=="__main__":
     verbose       = True#args.verbose
     #z_source_max  = args.z_source_max
 
-    Gal = get_rnd_NG()
+    Gal = get_rnd_PG()
     Gal = prep_Gal_projpath(Gal)
     plot_dens_map_hist(Gal=Gal,pixel_num=pixel_num,verbose=verbose,cutoff_radius=cutoff_radius)
     

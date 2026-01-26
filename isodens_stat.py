@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 
 from python_tools.tools import to_dimless
 from fnct import std_sim
-from remade_gal import sim_lens_path
-from Gen_PM_PLL_AMR import LoadLens
+from Gen_PM_PLL_AMR import LoadLens,sim_lens_path
 from isophote4isodens_AMR import fit_isodens,plot_isodens
 
 if __name__=="__main__":

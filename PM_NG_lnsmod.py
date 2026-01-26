@@ -13,10 +13,9 @@ from lenstronomy.Data.psf import PSF
 from python_tools.tools import mkdir
 from fnct import std_sim
 
-from remade_gal import get_rnd_NG,get_lens_dir
-from remade_gal import get_z_source,get_dP #,get_radius
- 
-Gal = get_rnd_NG()
+from ParticleGalaxy import get_rnd_PG,get_lens_dir,get_z_source,get_dP 
+
+Gal = get_rnd_PG()
 z_lens = Gal.z
 default_cosmo   =  Gal.cosmo#FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
 from NG_proj_part_hist import prep_Gal,get_dens_map_rotate_hist
