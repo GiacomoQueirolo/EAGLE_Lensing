@@ -94,22 +94,10 @@ def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=ver
         # dens_Ms_kpc2 is already given in Msun/kpc^2
         dens_Ms_kpc2 *= u.Msun/(u.kpc**2)
     assert dens_Ms_kpc2.unit==u.solMass/(u.kpc**2)
-    """
-    print("DEBUG z_lens",z_lens)
-    print("DEBU cosmo",cosmo)
-    print("DEBUG cosmo.angular_diameter_distance(z_lens)",cosmo.angular_diameter_distance(z_lens))
-    print("DEBUG NOTE: the approx MW surf.dens. is 2*1e9Msun/kpc^2")
-    print("DEBUG np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2))
-    print("DEBUG 4*np.pi*const.G",4*np.pi*const.G)
-    print("DEBUG cosmo.angular_diameter_distance(z_lens)",cosmo.angular_diameter_distance(z_lens))
-    print("DEBUG (const.c**2) ",(const.c**2) )
-    """
+
     max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
-    #print("DEBUG\n","np.max(dens_Ms_kpc2)",np.max(dens_Ms_kpc2.to("1e9Msun/kpc^2")))
-    #print("DEBUG\n","max_DsDds",max_DsDds)
     max_DsDds = max_DsDds.to("") # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
     max_DsDds = max_DsDds.value # dimensionless
-    #print("DEBUG\n","max_DsDds",max_DsDds)
     #z_source_range = np.linspace(z_lens,z_source_max,100) # it's a very smooth funct->
     min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
     min_DsDds = min_DsDds.to("") # dimensionless
@@ -453,8 +441,7 @@ def ReadGal(GAL,vebose=True):
 
 def get_rnd_PG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
                pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
-    """
-    Sample a galaxy at random 
+    """Randomly select a galaxy from the sample 
     """
     kw_gal   = get_rnd_gal_indexes(sim=sim,min_mass=min_mass,min_z=min_z,max_z=max_z,
                                    pkl_name=pkl_name,check_prev=check_prev,save_pkl=save_pkl)

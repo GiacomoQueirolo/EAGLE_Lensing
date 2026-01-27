@@ -29,7 +29,7 @@ from python_tools.tools import mkdir,get_dir_basename
 from python_tools.get_res import load_whatever
 
 
-from NG_proj_part_hist import z_source_max,pixel_num,prep_Gal_projpath
+from PG_proj_part_hist import z_source_max,pixel_num,prep_Gal_projpath
 #z_source_max = 5
 #pixel_num    = 150j
 verbose      = True

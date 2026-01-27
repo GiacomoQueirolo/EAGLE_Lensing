@@ -29,8 +29,8 @@ from lenstronomy.ImSim.image_model import ImageModel
 from lenstronomy.LensModel.lens_model import LensModel
 from lenstronomy.LightModel.light_model import LightModel
 from lenstronomy.LensModel.lens_model_extensions import LensModelExtensions
-
 from lenstronomy.SimulationAPI.sim_api import SimAPI
+#from lenstronomy.SimulationAPI.mag_amp_conversion import MagAmpConversion
 
 # My libs
 from python_tools.fwhm import get_fwhm
@@ -92,10 +92,11 @@ def get_LensSystem_kwrgs(Sim):
     psf_class   = Sim.psf_class
     # Source Params
     source_model_class = Sim.source_model_class
-    kwargs_source      = get_kwargs_sourceSim(Sim)
+    # Only one source profile for now
+    kwargs_source_list = [get_kwargs_sourceSim(Sim)]
     kwargs_numerics    = {'supersampling_factor': 1, 'supersampling_convolution': False}
 
-    return data_class, psf_class, source_model_class, kwargs_numerics, kwargs_source
+    return data_class, psf_class, source_model_class, kwargs_numerics, kwargs_source_list
     
 def get_LensSystem_kwrgs_old(deltaPix,pixel_num=pixel_num,
                          background_rms=None,exp_time=None,
@@ -111,14 +112,14 @@ def get_LensSystem_kwrgs_old(deltaPix,pixel_num=pixel_num,
     kwargs_psf  = {'psf_type': 'NONE'}  
     psf_class   = PSF(**kwargs_psf)
     # Source Params
-    source_model_class,kwargs_source = get_model_source(ra_source,dec_source,source_model_list=source_model_list)
+    source_model_class,kwargs_source_list = get_model_source(ra_source,dec_source,source_model_list=source_model_list)
     kwargs_numerics = {'supersampling_factor': 1, 'supersampling_convolution': False}
 
     # for modelling later:
     multi_band_list = [[kwargs_data, kwargs_psf, kwargs_numerics]]
     kwargs_data_joint = {'multi_band_list': multi_band_list, 
                      'multi_band_type': 'single-band'}
-    return data_class, psf_class, source_model_class, kwargs_numerics, kwargs_source,kwargs_data_joint
+    return data_class, psf_class, source_model_class, kwargs_numerics, kwargs_source_list,kwargs_data_joint
 
 
 def get_model_source(ra_source=0,dec_source=0,
@@ -127,15 +128,14 @@ def get_model_source(ra_source=0,dec_source=0,
         _kwargs_source["center_x"] = ra_source
     if dec_source!=0:
         _kwargs_source["center_y"] = dec_source
-    kwargs_source = [_kwargs_source]
+    kwargs_source_list = [_kwargs_source]
     source_model_class = LightModel(light_model_list=source_model_list)
-    return source_model_class,kwargs_source
+    return source_model_class,kwargs_source_list
 
-from lenstronomy.SimulationAPI.mag_amp_conversion import MagAmpConversion
-
-def get_kwargs_sourceSim(Sim,_kwargs_source_mag=kwargs_sersic_ellipse_mag):
-    # the following only depends on -kwargs_source_params, -magnitude_0_point -source_model_list
-    _, kwargs_source, _ = Sim.magnitude2amplitude(kwargs_source_mag = _kwargs_source_mag)
+def get_kwargs_sourceSim(Sim,kwargs_source=kwargs_sersic_ellipse_mag):
+    if "mag" in kwargs_source.keys():
+        # the following only depends on -kwargs_source_params, -magnitude_0_point -source_model_list
+        _, kwargs_source, _ = Sim.magnitude2amplitude(kwargs_source_mag = kwargs_source)
     return kwargs_source
 
 def get_dataclasses(Sim):
@@ -222,84 +222,117 @@ class LensPart():
     ### Class Structure ####
     ########################
     def _identity(self):
-        # Returns tuple to identify uniquely this galaxy
-        Id = (self.Gal._identity(),
-              self.PMLens._identity(),
-              self.pixel_num,
-              self.z_source_max)
-              #,self.exp_time,self.bckg_rms)
-        return Id
+        """Return an immutable tuple uniquely identifying this galaxy.
+
+        The identity is used for hashing, equality, and cache keys.
+        """
+        return (
+            self.Gal._identity(),
+            self.PMLens._identity(),
+            self.pixel_num,
+            self.z_source_max,
+            )
     
     def __hash__(self):
-        # simplify the hash method
+        """ Simplified hash based exclusively on the immutable identity tuple.
+        """
         return hash(self._identity())
 
     def __eq__(self, other):
+        """LensPart instances are equal if and only if they share
+        the same conceptual identity.
+        """
         if not isinstance(other, LensPart):
             return NotImplemented
         return self._identity() == other._identity()
 
-    def __str__(self):
+    def __str__(self): 
+        """Human-readable identifier.
+
+        Lazily initializes the name if it has not been generated yet.
+        """
         if not getattr(self,"name",False):
             self._setup_names()
         return self.name
+
+    # ------------------------------------------------------------------
+    # Pickling support (dill / pickle)
+    # ------------------------------------------------------------------
+
     # the following struct. is more clear and allow a slimmer stored class
     def __getstate__(self):
+        """Return a slimmed-down state dictionary for serialization.
+
+        Reconstruction is handled by `unpack()`.
+        """
         state = self.__dict__.copy()
-        # remove large but recomputable attributes (if present)
+        # Large / recomputable lensing structures
         state.pop('kwargs_lens_PART', None)
         state.pop('lens_model_PART', None)
         state.pop('kw_shear',None)
         state.pop('imageModel',None)
-        # Gal should not be stored again, but reloaded afterwards
+        # These are reloaded / reconstructed
         state.pop('Gal',None)
-        # PMLens is easy to recompute (careful to set it up as well)
         state.pop('PMLens',None)
-        # cosmo can be obtain by Gal
         state.pop('cosmo',None)
-        # could also remove image_sim if it's heavy
-        #try:
-        #    state['imageModel'].ImageNumerics._numerics_subframe._grid = None
-        #except Exception:
-        #    pass
         return state
 
     def __setstate__(self, state):
-        # Optional: restore defaults or trigger rebuild of heavy attributes
-        self.__dict__.update(state)
+        """Restore object state from a serialized dictionary.
 
-    def store(self):
-        # store the instance of the class
-        if not hasattr(self,"pkl_path"):
-            self._setup_names()
-        with open(self.pkl_path, "wb") as f:
-            dill.dump(self, f)
-        print("Saved", self.pkl_path)
-        return 0
-        
+        NOTE:
+        - This does *not* automatically reconstruct heavy attributes.
+        - Lazy reconstruction is deferred until explicitly needed.
+        """
+        self.__dict__.update(state)
+ 
+    # ------------------------------------------------------------------
+    # Lazy reconstruction logic
+    # ------------------------------------------------------------------
+    def _needs_unpacking(self):
+        """Check whether the object is missing reconstructed attributes.
+        """
+        return not all(
+            hasattr(self, attr)
+            for attr in ("Gal", "PMLens", "cosmo")
+        )
     def _unpack(self):
-        # this function recover the parts deleted before 
-        # storing to save space
+        """Reconstruct all attributes that were intentionally removed
+        before serialization.
+        """
+        # reload Galaxy
         Galaxy = LoadClass(self.Gal_path)
         Galaxy = prep_Gal_projpath(Galaxy)
         self.Gal   = Galaxy
         self.cosmo = Galaxy.cosmo
+        
         # re-define PMLens
         self.PMLens = PMLens(self.kwlens_part)
         self.PMLens.setup(self)
-        # recover kwargs_lens_PART and lens_model_PART
-        if not "lens_model_PART" in self.__dict__:
-            self.setup_lenses() 
-        # recover imageModel
-        self.get_imageModel()
-        return True
+        
+        # Rebuild lens model if missing
+        if not hasattr(self, "lens_model_PART"):
+            self.setup_lenses()
+
+        # Rebuild image model
+        if not hasattr(self, "imageModel"):
+            self.get_imageModel()
         
     def unpack(self):
-        # wrapper for the unpack function, 
-        # so it runs only when necessary
-        if not "Gal" in self.__dict__:
+        """Public wrapper for lazy reconstruction.
+        """
+        if self._needs_unpacking():
             self._unpack()
-        return True
+        return self
+        
+    def store(self):
+        """Serialize the current object to disk using dill.
+        """
+        if not hasattr(self,"pkl_path"):
+            self._setup_names()
+        with open(self.pkl_path, "wb") as f:
+            dill.dump(self, f)
+        print(f"Saved {self.pkl_path}")
     ########################
     ########################
 
@@ -326,25 +359,49 @@ class LensPart():
             return True
         return False
 
-    def run(self,read_prev=True):
+    def run(self,read_prev=True,verbose=True):
+        """Main function that computes the deflection map:
+            - read the particles
+            - iteratively test projections given a source at redshift 
+            within z_source_min=z_lens and z_source_max(=4 by default)
+                - for each projection, compute density map with AMR
+                - if maximum density supercritical, select that projection
+                    - sample the source redshift (ATM uniformily)
+                    - find the coordinate of Maximum Density (MD) and recenter around it
+                    - compute estimate of theta_E
+                - else, move to next projection
+                - if no projection is supercritical, discard galaxy as a lens
+            - compute sigma critical
+            - define grid aperture radius = 2*theta_E
+                - from it and the pixel number, obtain pixel size in arcsec
+            - compute the deflection map within the grid
+            - create the lensed image given the source and simulated observation conditions
+            - store the results
+        """
         upload_successful = False
         if read_prev:
             upload_successful = self.upload_prev()
         if not upload_successful:
             # Read particles ONLY ONCE
-            kw_parts         = Gal2kwMXYZ(self.Gal) # kwargs of Msun, XYZ in kpc (explicitely) centered around Centre of Mass (CM)
+            # kwargs of Msun, XYZ in kpc (explicitely) centered around Centre of Mass (CM)
+            kw_parts         = Gal2kwMXYZ(self.Gal) 
+            # Compute projection
             kwres_proj       = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
-                            z_source_max=self.z_source_max,sample_z_source=self.sample_z_source,min_thetaE=self.min_thetaE,
-                            arcXkpc=self.arcXkpc,verbose=True,save_res=True,reload=self.reload)
-
+                                                   z_source_max=self.z_source_max,
+                                                   sample_z_source=self.sample_z_source,
+                                                   min_thetaE=self.min_thetaE,
+                                                   arcXkpc=self.arcXkpc,verbose=verbose,
+                                                   save_res=True,reload=self.reload)
             self.proj_index   = kwres_proj["proj_index"]
             self.z_source_min = kwres_proj["z_source_min"]
             self.z_source     = kwres_proj["z_source"]
             self.MD_coords    = kwres_proj["MD_coords"]
-            print("Z source sampled:",self.z_source)
+            if verbose:
+                print("Z source sampled:",self.z_source)
             self.thetaE    = kwres_proj["thetaE"]
-            print("Approx. thetaE:",np.round(self.thetaE,3))
-
+            if verbose:
+                print("Approx. thetaE:",np.round(self.thetaE,3))
+            
             # the following 2 can only be computed once we know the z_source:
             self.SigCrit       = SigCrit(cosmo=self.cosmo,z_lens=self.z_lens,z_source=self.z_source) # Msun/kpc^2
 
@@ -352,7 +409,8 @@ class LensPart():
             # Then define the radius based on ~ theta_E
             scale_tE       = 2 
             self.radius    = self.thetaE*scale_tE
-            print("Image radius:",np.round(self.radius,3))
+            if verbose:
+                print("Image radius:",np.round(self.radius,3))
     
             Diam_arcsec      = 2*self.radius #diameter in arcsec
             self.deltaPix    = Diam_arcsec/self.pixel_num # ''/pix
@@ -390,7 +448,7 @@ class LensPart():
     # the following is meant to be rerun every time we load the class to save space
     # -> computationally not intense 
     def setup_lenses(self):
-        print("Setting up lensing parameters")
+        print("Setting up lensing parameters...")
         # Convert x,y,z in samples and get masses
         kw_samples = Gal2kw_samples(Gal=self.Gal,proj_index=self.proj_index,
                                     MD_coords=self.MD_coords,arcXkpc=self.arcXkpc)
@@ -408,15 +466,16 @@ class LensPart():
         z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
         return z_source
         
-    def get_lensed_image(self):
+    def get_lensed_image(self,unconvolved=True,update_source_pos=True):
         self.unpack()
-        sourceModel  = self.source_model_class
         imageModel   = self.imageModel
-        x_source,y_source = self.sample_source_pos(update=True)
+        # for now only one profile - we could think of generalising it for multiples
+        sourceModel  = self.source_model_class
+        x_source,y_source = self.sample_source_pos(update=update_source_pos)
         
         x_source_plane,y_source_plane = self.get_xy_source_plane()
         source_light = sourceModel.surface_brightness(x_source_plane, y_source_plane, self.kwargs_source, k=None)
-        image_sim    = imageModel.ImageNumerics.re_size_convolve(source_light, unconvolved=True)
+        image_sim    = imageModel.ImageNumerics.re_size_convolve(source_light, unconvolved=unconvolved)
         # imageModel.image(self.kwargs_lens_PART, self.kwargs_source, kwargs_lens_light=None, kwargs_ps=None)
         return image_sim
 
@@ -454,9 +513,9 @@ class LensPart():
         return x_source_plane,y_source_plane
         
     def get_imageModel(self,Sim):
-        if not "data_class" in self.__dict__ :
+        if not hasattr(self, "data_class"):
             self.setup_dataclasses()
-        if not "lens_model_PART" in self.__dict__:
+        if not hasattr(self, "lens_model_PART"):
             self.setup_lenses()
         self.imageModel = ImageModel(self.data_class, self.psf_class, 
                             self.lens_model_PART, 
@@ -529,7 +588,7 @@ class LensPart():
         # if psi_map has not been computed yet, computes it
         # and stores it
         # if it has, just returns the values
-        if not "_psi_map" in self.__dict__:
+        if not hasattr(self, "_psi_map"):
             _ = self._psi_map
             self.store()
         return self._psi_map
@@ -595,9 +654,7 @@ class LensPart():
     def get_imageModelObs(self):
         # contrary to the stnd. get_imageModel (used to compute lensing params and sim image),
         # this is used ONLY to create realistic observations from it (no lensing recomputation)
-        #if not "SimObs" in self.__dict__:
-            
-        if not "data_classObs" in self.__dict__ :
+        if not hasattr(self, "data_classObs"):
             self.setup_dataclassesObs()
         self.imageModelObs = ImageModel(data_class= self.data_classObs, 
                                         psf_class = psf_self.psf_classObs, 

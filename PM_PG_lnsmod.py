@@ -14,11 +14,11 @@ from python_tools.tools import mkdir
 from fnct import std_sim
 
 from ParticleGalaxy import get_rnd_PG,get_lens_dir,get_z_source,get_dP 
+from PG_proj_part_hist import prep_Gal,get_dens_map_rotate_hist
 
 Gal = get_rnd_PG()
 z_lens = Gal.z
 default_cosmo   =  Gal.cosmo#FlatLambdaCDM(H0=Gal.h*100, Om0=1-Gal.h)
-from NG_proj_part_hist import prep_Gal,get_dens_map_rotate_hist
 Gal = prep_Gal(Gal)
 # if this
 dens_Ms_kpc2,radius,dP,dxdy,z_source,cosmo,proj_index = get_dens_map_rotate_hist(Gal,plot=False)
@@ -32,7 +32,7 @@ kw_lensmodel_data = lens_dir+"/kwdata.pkl"
 
 # point mass theta_E (from eq.4.7 of Meneghetti's lecture note - and by memory)
 # theta_E = \sqrt ( 4GM D_ls / (c^2 Ds Dl) )
-# divide the computation such that it's done only once
+# split the computation such that it's done only once
 def thetaE_PM_prefact(z_lens,z_source,cosmo=default_cosmo):
     # from eq 21 of Narayan "Lectures on GL" 2008
     # theta_E(PM) = sqrt(4GM Dds/(c^2 Dd Ds))   = sqrt(M) * sqrt(4G Dds/(c^2 Dd Ds))
@@ -75,18 +75,12 @@ arcXkpc = default_cosmo.arcsec_per_kpc_proper(Gal.z)
 
 
 Xstar,Ystar,Zstar =  np.transpose(Gal.stars["coords"])# Mpc
-#RAstar,DECstar = Xstar.to("kpc").value*arcXkpc,Ystar.to("kpc").value*arcXkpc
 Xgas,Ygas,Zgas    =  np.transpose(Gal.gas["coords"]) # Mpc
-#RAgas,DECgas = Xgas.to("kpc").value*arcXkpc,Ygas.to("kpc").value*arcXkpc
 Xdm,Ydm,Zdm       =  np.transpose(Gal.dm["coords"]) # Mpc
-#RAdm,DECdm = Xdm.to("kpc").value*arcXkpc,Ydm.to("kpc").value*arcXkpc
 Xbh,Ybh,Zbh       =  np.transpose(Gal.bh["coords"]) # Mpc
-#RAbh,DECbh = Xbh.to("kpc").value*arcXkpc,Ybh.to("kpc").value*arcXkpc
 Xs = np.concatenate([Xstar,Xgas,Xdm,Xbh])*u.Mpc.to("kpc")
 Ys = np.concatenate([Ystar,Ygas,Ydm,Ybh])*u.Mpc.to("kpc")
 Zs = np.concatenate([Zstar,Zgas,Zdm,Zbh])*u.Mpc.to("kpc")
-print("DEBUG - Npart")
-print(len(Xs))
 
 # projection along given indexes
 # xy : ind=0
@@ -110,8 +104,7 @@ DEC_cm = np.sum(DECs* Ms.value)/np.sum(Ms.value)
 
 #lens_model_list = []
 lens_model_list  = ["POINT_MASS"]*len(thetaEs)
-print("DEBUG - Npart")
-print(len(thetaEs),len(thetaEs)==len(Xs))
+
 #use CGPT parallelisation:
 from concurrent.futures import ThreadPoolExecutor
 
@@ -126,8 +119,6 @@ def build_kwargs_lens(args):
 # Parallel execution
 with ThreadPoolExecutor() as executor:
     kwargs_lens = list(executor.map(build_kwargs_lens, zip(thetaEs, RAs, DECs)))
-print("DEBUG - Npart")
-print(len(kwargs_lens),len(kwargs_lens)==len(thetaEs))
 
 # save the kwargs
 print("Saving "+kw_lns)
@@ -156,7 +147,6 @@ print(f"WRN: Consider an arbitrary radius of {rad} around the centre")
 rad_arcsec  = rad*arcXkpc.to('arcsec/kpc')
 Diam_arcsec = 2*rad_arcsec.value #diameter in arcsec
 
-#numPix   = 100   # cutout pixel size
 deltaPix = 0.04  # pixel size in arcsec (area per pixel = deltaPix**2)
 numPix   = int(.7*Diam_arcsec/deltaPix)
 if numPix >500:
@@ -165,9 +155,6 @@ if numPix >500:
     print("deltaPix:",deltaPix)
 else:
     print("Resulting image size:", numPix)
-
-#fwhm = 0.01  # full width half max of PSF -> very small, almost none
-
 
 kwargs_data = sim_util.data_configure_simple(numPix, deltaPix, 
                                              exp_time,background_rms,
@@ -202,19 +189,7 @@ unlensed_image_sim = SourceimageModel.image(kwargs_lens=None,
                                             kwargs_source=kwargs_source, 
                                             kwargs_lens_light=None,
                                             kwargs_ps=None)
-#fg,ax=plt.subplots(2,2,figsize=(16,8))
 
-# kappa is useless as it is always 0 -> point masses
-#kappa_lnstr = lens_model_class.kappa(,kwargs_lens)
-#ax[0][0].matshow(np.log10(kappa_lnstr), origin='lower')
-#ax[0][0].set_title(r"$\kappa$ (lnstr)")
-
-# to implement later
-#ax[0][1].matshow(np.log10(SGl.density), origin='lower')
-#ax[0][1].set_title("Denstiy (SimGal)")
-#lnsd_SGl = SGl.source_class.image(SGl.ra_im,SGl.dec_im) 
-#ax[1][1].matshow(np.log10(lnsd_SGl), origin='lower')
-#ax[1][1].set_title("Lensed image (SimGal)")
 extent = [-rad_arcsec.value,rad_arcsec.value,-rad_arcsec.value,rad_arcsec.value]
 
 fg,ax=plt.subplots(1,2,figsize=(16,8))
@@ -241,16 +216,6 @@ from lenstronomy.Util import util
 x_grid, y_grid = util.make_grid(numPix=numPix, deltapix=deltaPix)  
 x,y = util.array2image(x_grid),util.array2image(y_grid)
 
-# convergence map
-"""_kappa_map = lens_model_class.kappa(x_grid, y_grid, kwargs_lens)  
-kappa_map = util.array2image(_kappa_map)
-print("any kappa map >1:",np.any(kappa_map>1))
-fg,ax=plt.subplots(1,figsize=(16,8))
-ax.imshow(np.log10(kappa_map),extent=extent,origin="lower")
-ax.contour(np.log10(kappa_map),cmap=plt.cm.inferno,extent=extent)
-ax.set_title(r"$\kappa$ map")
-name_file = "./tmp/kappa_PM.pdf"
-"""
 # deflections
 _alpha_x,_alpha_y = lens_model_class.alpha(x_grid, y_grid, kwargs_lens)  
 alpha_x,alpha_y   = util.array2image(_alpha_x),util.array2image(_alpha_y)
@@ -264,20 +229,7 @@ ax[1].set_title(r"$\alpha_y$")
 name_file = "./tmp/alpha_PM.pdf"
 plt.savefig(name_file)
 print("Saving "+name_file)
-"""
-plt.matshow(np.log10(image_sim), origin='lower')
-plt.savefig(lens_dir+"/lensed_im.pdf")
 
-poisson = image_util.add_poisson(image_sim, exp_time=exp_time)
-bkg = image_util.add_background(image_sim, sigma_bkd=background_rms)
-image_sim = image_sim + bkg + poisson
-
-kwargs_data['image_data'] = image_sim
-data_class.update_data(image_sim)
-
-plt.matshow(np.log10(image_sim), origin='lower')
-plt.savefig(lens_dir+"/lensed_im_noisy.pdf")
-"""
 print("Saving "+kw_lensmodel_data)
 with open(kw_lensmodel_data,"wb") as f:
     pickle.dump(kwargs_data,f)

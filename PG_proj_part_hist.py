@@ -1,4 +1,4 @@
-# copied from proj_part_hist but now using the "NewGalaxy" class
+# copied from proj_part_hist but now using the "ParticleGalaxy" class
 
 import os
 import csv
