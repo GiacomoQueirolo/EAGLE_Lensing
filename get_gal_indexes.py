@@ -1,4 +1,3 @@
-# copy from plot_GSMF
 # adapted to plot N of galaxies at different redshifts
 # then output a table of indexes to use to get them, with 
 # - coordinates

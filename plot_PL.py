@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from python_tools.fwhm import get_fwhm
 from Gen_PM_PLL_AMR import get_extents
 
 def _plot_caustics(LPClass,

@@ -1,12 +1,7 @@
 # copied from create_mass_image.py (now old)
 # we want to create iso-mass (and maybe iso-phot) contours of the galaxy
 
-import os
-import csv
-import glob
-import pickle
 import numpy as np
-from copy import copy
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser 
 #from scipy.stats import gaussian_kde
@@ -16,29 +11,22 @@ from matplotlib.patches import Rectangle
 from matplotlib.lines import Line2D
 
 from astropy import units as u
-from astropy import constants as const
 from astropy.cosmology import FlatLambdaCDM
-from lenstronomy.LensModel import convergence_integrals
-
-#from lenstronomy.Util import util
 
 from fnct import gal_dir,std_sim
 from ParticleGalaxy import get_rnd_PG
 
-from python_tools.tools import mkdir,get_dir_basename
-from python_tools.get_res import load_whatever
+#from PG_proj_part_hist import z_source_max,pixel_num,prep_Gal_projpath
+from Gen_PM_PLL_AMR import pixel_num
+from project_gal_AMR import prep_Gal_projpath
 
-
-from PG_proj_part_hist import z_source_max,pixel_num,prep_Gal_projpath
-#z_source_max = 5
-#pixel_num    = 150j
 verbose      = True
 
-from Gen_PM_PLL import     cutoff_radius 
+#from Gen_PM_PLL import     cutoff_radius 
+cutoff_radius = 100*u.kpc
 
-from ParticleGalaxy import get_z_source,get_dP,Gal2kwMXYZ #get_radius
-
-from project_gal  import proj_parts,findDens,get_densmap,xyminmax
+from ParticleGalaxy import Gal2kwMXYZ 
+from project_gal  import get_densmap,xyminmax
 
 from scipy.ndimage import gaussian_filter
 from python_tools.tools import to_dimless
@@ -46,7 +34,8 @@ from python_tools.tools import to_dimless
 
 def _plot_dens_map_hist(kw_parts,proj_index,pixel_num,cutoff_radius,sigma_smooth,nlevels):
     density = get_densmap(kw_parts,proj_index,pixel_num*3,
-                          cutoff_radius=cutoff_radius,cutoff_radius_dens=100*u.kpc,verbose=True)
+                          cutoff_radius=cutoff_radius,
+                          cutoff_radius_dens=100*u.kpc,verbose=True)
 
     smooth_density = gaussian_filter(density.value, sigma=sigma_smooth)
     vmin, vmax = np.nanmin(smooth_density), np.nanmax(smooth_density)
@@ -231,7 +220,6 @@ if __name__=="__main__":
     parser = ArgumentParser(description="Project particles into a mass sheet - histogram version")
     parser.add_argument("-dn","--dir_name",dest="dir_name",type=str, help="Directory name",default="proj_part_hist")
     parser.add_argument("-pxn","--pixel_num",dest="pixel_num",type=int, help="Pixel number",default=pixel_num.imag)
-    #parser.add_argument("-zsm","--z_source_max",dest="z_source_max",type=float, help="Maximum source redshift",default=z_source_max)
     parser.add_argument("-nrr", "--not_rerun", dest="rerun", 
                         default=True,action="store_false",help="if True, rerun code")
 
@@ -242,8 +230,7 @@ if __name__=="__main__":
     rerun         = args.rerun
     dir_name      = args.dir_name
     verbose       = True#args.verbose
-    #z_source_max  = args.z_source_max
-
+    
     Gal = get_rnd_PG()
     Gal = prep_Gal_projpath(Gal)
     plot_dens_map_hist(Gal=Gal,pixel_num=pixel_num,verbose=verbose,cutoff_radius=cutoff_radius)

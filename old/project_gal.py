@@ -1,32 +1,17 @@
-# Take Gal from remade_gal and does projection and similar calculations
-# functions usefuls for lensing and later imported by Gen_PM_PLL.py
+# Take Gal from ParticleGalaxy and does projection and similar calculations
 
-
-import os
-import glob
-import pickle
+import dill
 import numpy as np
+from copy import copy,deepcopy
 import matplotlib.pyplot as plt
 
 import astropy.units as u
 import astropy.constants as const
-from astropy.cosmology import FlatLambdaCDM
+from scipy.ndimage import gaussian_filter1d
 
-from python_tools.tools import mkdir,to_dimless,short_SciNot
-
-from ParticleGalaxy import get_CM,Gal2kwMXYZ
-
-# for now keep this and check if still needed
-dir_name     = "proj_part_hist"
-def prep_Gal_projpath(Gal,dir_name=dir_name):
-    # impractical but easy to set up
-    Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
-    mkdir(Gal.proj_dir)
-    Gal.proj_zs_path = f"{Gal.proj_dir}/proj_zs.pkl"
-    return Gal
-
+from python_tools.tools import to_dimless,short_SciNot
 from python_tools.get_res import load_whatever
-from copy import copy,deepcopy
+from ParticleGalaxy import get_CM,Gal2kwMXYZ
 
 def proj_parts(kw_parts,proj_index,arcXkpc=None):    
     Xs,Ys,Zs = kw_parts["Xs"],kw_parts["Ys"],kw_parts["Zs"]
@@ -99,7 +84,7 @@ def get_minzsource_proj(Gal,kw_parts,cutoff_radius,pixel_num,z_source_max,verbos
             
         if save_res:
             with open(Gal.proj_zs_path,"wb") as f:
-                pickle.dump(kw_res,f)
+                dill.dump(kw_res,f)
             print("Saved "+Gal.proj_zs_path)
         return kw_res
 
@@ -244,8 +229,6 @@ def _get_min_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max,verbose=True):
         return z_source_min
 
 
-
-
 def get_rough_radius(cosmo,z_source,z_lens,kw_part_arc,scale=2,verbose=True):
     # -> this should only be used for plotting
     # the idea is simple:
@@ -268,7 +251,6 @@ def get_rough_radius(cosmo,z_source,z_lens,kw_part_arc,scale=2,verbose=True):
     kw_Ddds = {"Dd":Dd,"Dds":Dds,"Ds":Ds}
     return scale*theta_E_from_particles(verbose=verbose,**kw_part_RADEC_cnt,**kw_Ddds) # arcsec
 
-from scipy.ndimage import gaussian_filter1d
 def theta_E_from_particles(Ms, RA, DEC, Dd, Ds, Dds, nbins=100,verbose=True,sigma_smooth=2.):
     # Physical scale of 1 arcsec at Dd
     arcXkpc = u.rad.to("arcsec")*u.arcsec/Dd.to("kpc") # arcsec/kpc (on the lens plane)
@@ -308,88 +290,6 @@ def theta_E_from_particles(Ms, RA, DEC, Dd, Ds, Dds, nbins=100,verbose=True,sigm
     plt.savefig(nm_tmp)
     plt.close()
     return theta_E_arcsec
-
-"""
-# old - imperfect due to histogram resolution at small apertures
-def theta_E_from_particles(Ms, RA, DEC, Dd, Ds, Dds, nbins=200,verbose=True):
-   
-    #Ms [Msun], RA, DEC [arcsec]
-    #Dd,Ds,Dds angular diameter distances [Mpc]
-    #Returns theta_E in arcsec.
-    
-    # big brain time: 
-    arcXkpc = u.rad.to("arcsec")*u.arcsec/Dd.to("kpc") # arcsec/kpc (on the lens plane)
-    # critical surface density
-    Sigma_crit = (const.c**2 / (4*np.pi*const.G) * (Ds/(Dd*Dds))).to("Msun/kpc^2") # Msun/kpc^2
-    # cylindrical radius
-    thetas = np.sqrt(RA**2 + DEC**2)  # arcsec
-    
-    # mass in annuli -> not too slow to compute
-    # we recompute it such that the area are the same for all bins AND skip the first 2 bins
-    r_max = np.max(thetas)
-    Sigma_encl,theta_mid = _get_Sigma_encl(thetas,Ms,r_max,nbins)
-    Sigma_encl_kpc2 = Sigma_encl*arcXkpc**2  # Msun/kpc^2
-
-    # find R where Sigma_encl = Sigma_crit
-    idx = np.argmin(np.abs(Sigma_encl_kpc2 - Sigma_crit))
-    theta_E_arcsec = theta_mid[idx] # arcsec
-    while idx==0:
-        # the resolution of the histogram is likely too small to 
-        # get the required resolution -
-        # rerun the histogram within this aperture
-        r_max = 3*theta_E_arcsec
-        Sigma_encl,theta_mid = _get_Sigma_encl(thetas,Ms,r_max,nbins)
-        Sigma_encl_kpc2 = Sigma_encl*arcXkpc**2  # Msun/kpc^2
-        idx = np.argmin(np.abs(Sigma_encl_kpc2 - Sigma_crit))
-        theta_E_arcsec = theta_mid[idx] # arcsec
-
-    print("--DEBUG")
-    plt.scatter(theta_mid*arcXkpc,Sigma_encl_kpc2)
-    plt.axhline(Sigma_crit.value,ls="--",c="r",label=r"$\Sigma_{crit}$")
-    plt.xlabel(r"kpc")
-    plt.axvline(to_dimless(theta_E_arcsec*arcXkpc),label=r"$\theta_E$ [kpc]")
-
-    plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl_kpc2.unit)+"]")
-    plt.title(r"$\Sigma_{encl}$")
-    plt.legend()
-    nm_tmp = "tmp/Sigma.png"
-    plt.savefig(nm_tmp)
-    plt.close()
-    print("SAVED "+nm_tmp)
-    print("DEBUG--")
-    
-    # DEBUG 
-    plt.scatter(theta_mid,hist)
-    plt.axvline(to_dimless(theta_E_arcsec),label=r"$\theta_E$")
-    plt.title("Mass x bin")
-    plt.xlabel(r"$\theta$['']")
-    plt.ylabel("M")
-    plt.legend()
-    nm_tmp = "tmp/masshist1D.png"
-    plt.savefig(nm_tmp)
-    plt.close()
-    print("theta_E:",theta_E_arcsec)
-    print("DEBUG\nSaving "+nm_tmp)
-    
-    return theta_E_arcsec
-"""
-    
-    
-def _get_Sigma_encl(thetas,Ms,r_max,nbins):
-    i = np.arange(nbins + 1)
-    R_edges = r_max * np.sqrt(i / nbins)
-    
-    hist, edges = np.histogram(thetas, bins=R_edges, weights=Ms)
-    theta_mid   = 0.5 * (edges[1:] + edges[:-1])
-    
-    # enclosed mass
-    M_encl = np.cumsum(hist)
-    
-    # area of circle
-    area = np.pi * theta_mid**2 #arcsec^2
-    # average Sigma(<R)
-    Sigma_encl      = M_encl / area # Msun/arcsec^2
-    return Sigma_encl,theta_mid
 
 def Gal2MRADEC(Gal,proj_index,arcXkpc):
     kw_parts = Gal2kwMXYZ(Gal)

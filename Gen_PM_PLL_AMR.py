@@ -25,9 +25,8 @@ from lenstronomy.SimulationAPI.sim_api import SimAPI
 #from lenstronomy.SimulationAPI.mag_amp_conversion import MagAmpConversion
 
 # My libs
-from python_tools.fwhm import get_fwhm
 from python_tools.get_res import load_whatever,LoadClass
-from python_tools.tools import mkdir,short_SciNot,to_dimless,ensure_unit
+from python_tools.tools import mkdir,to_dimless,ensure_unit
 # Get particle from galaxy catalogue
 from ParticleGalaxy import get_rnd_PG,Gal2kwMXYZ,LoadGal
 # particle lens class and params.
