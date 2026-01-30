@@ -1,5 +1,8 @@
 # copied from proj_part_hist but now using the "ParticleGalaxy" class
 
+raise DeprecationWarning("Use project_gal_AMR.py instead - mostly the coords are now wrong")
+# due to the clipping of extremes
+
 import os
 import csv
 import glob

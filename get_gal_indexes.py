@@ -14,7 +14,8 @@ from fnct import std_sim,gal_dir
 from sql_connect import exec_query
 from python_tools.get_res import load_whatever
 
-def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl_name="massive_gals.pkl",plot=True,check_prev=True):
+pkl_name = "massive_gals.pkl"
+def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,pkl_name=pkl_name,plot=True,check_prev=True):
     pkl_path = f"{gal_dir}/{pkl_name}" 
     # select higher masses bc 1) lenses 2) else we have too many points
     myQuery = "SELECT \

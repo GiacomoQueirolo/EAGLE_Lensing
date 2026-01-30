@@ -1,7 +1,9 @@
-#
-# Particle functions
-#
-
+"""
+Particle lenses function
+Main Class: PMLens
+From sample of particles, returns kwargs and model for lenstronomy
+depending on the particle potential profile chosen (for now AS or PM)
+"""
 import numpy as np
 import astropy.units as u
 import astropy.constants as const

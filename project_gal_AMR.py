@@ -1,20 +1,23 @@
 # copy from project_gal_alpha
 # instead of a "dumb" optimised 2D histogram, run Adaptive mesh refinement
 # this would give me easily the MD and as well we can get the first bin higher than sigma crit in order to get theta_E
-import os
-import glob
 import dill
 import numpy as np
-from time import time
+from copy import copy
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.colors import  Normalize
+from matplotlib.cm import ScalarMappable
 
 import astropy.units as u
 import astropy.constants as const
-from astropy.cosmology import FlatLambdaCDM
 
 from python_tools.tools import mkdir,to_dimless,ensure_unit,short_SciNot
+from python_tools.get_res import load_whatever
 
+from lib_cosmo import SigCrit
 from ParticleGalaxy import Gal2kwMXYZ,get_CM
+
 # for now keep this and check if still needed
 dir_name     = "proj_part_hist"
 def prep_Gal_projpath(Gal,dir_name=dir_name):
@@ -24,8 +27,6 @@ def prep_Gal_projpath(Gal,dir_name=dir_name):
     Gal.projection_path = f"{Gal.proj_dir}/projection.pkl"
     return Gal
 
-from python_tools.get_res import load_whatever
-from copy import copy,deepcopy
 
 def proj_parts(kw_parts,proj_index):    
     Xs,Ys,Zs = kw_parts["Xs"],kw_parts["Ys"],kw_parts["Zs"]
@@ -121,10 +122,10 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
             kw_z_min["z_source"] = z_source
             
             # get an estimate of theta_E 
-            thetaE = get_rough_thetaE_PLL(kw_2Ddens,Gal.cosmo,Gal.z,z_source,path=Gal.proj_dir,plt_Sig=kw_z_min["plt_Sig"])
+            thetaE = get_rough_thetaE_PLL(kw_2Ddens,Gal.cosmo,Gal.z,z_source,path=Gal.proj_dir,fig_Sig=kw_z_min["fig_Sig"])
             
             del kw_2Ddens["AMR_cells"] 
-            del kw_z_min["plt_Sig"]
+            del kw_z_min["fig_Sig"]
             kw_thetaE = {"thetaE":thetaE} 
                         
             kw_res  = kw_proj|kw_2Ddens|kw_z_min|kw_thetaE
@@ -185,7 +186,6 @@ def dens_map_AMR(Gal,
     kw_2Ddens = {"MD_value":MD_value,"MD_coords":MD_coords,"AMR_cells":AMR_cells}
     return kw_2Ddens
 
-from lib_cosmo import SigCrit
 def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,savenameSigmaEnc = "tmp/Sigma_enc.png"):
     # given a projection, return the minimal z_source
     # fails if it can't produce a supercritical lens w. z_source<z_source_max
@@ -198,24 +198,25 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     theta = r*arcXkpc
     Sigma_encl_arc = Sigma_encl/(arcXkpc**2)
     Sigma_crit_min_arc = Sigma_crit_min/(arcXkpc**2)
-    plt.close()
-    plt.plot(theta,Sigma_encl_arc,color="k")
-    plt.axhline(Sigma_crit_min_arc.value,ls="--",c="r",label=r"$\Sigma_{crit}^{min}=\Sigma_{crit}(z_{source,max}$="+str(z_source_max)+")="+str(short_SciNot(Sigma_crit_min_arc)))
+    #plt.close()
+    fig,ax = plt.subplots(1)
+    ax.plot(theta,Sigma_encl_arc,color="k")
+    ax.axhline(Sigma_crit_min_arc.value,ls="--",c="r",label=r"$\Sigma_{crit}^{min}=\Sigma_{crit}(z_{source,max}$="+str(z_source_max)+")="+str(short_SciNot(Sigma_crit_min_arc)))
     min_thetaE = min_thetaE_kpc*arcXkpc
-    plt.axvline(to_dimless(min_thetaE),label=r"$\theta_{min}$="+str(short_SciNot(min_thetaE)),ls="-",c="grey")
+    ax.axvline(to_dimless(min_thetaE),label=r"$\theta_{min}$="+str(short_SciNot(min_thetaE)),ls="-",c="grey")
     dens_at_thetamin_arc = dens_at_thetamin/(arcXkpc**2)
-    plt.axhline(to_dimless(dens_at_thetamin_arc),label=r"$\Sigma(\theta_{min})$="+str(short_SciNot(dens_at_thetamin_arc)),ls="--",c="g")
+    ax.axhline(to_dimless(dens_at_thetamin_arc),label=r"$\Sigma(\theta_{min})$="+str(short_SciNot(dens_at_thetamin_arc)),ls="--",c="g")
     if np.any(Sigma_crit_min_arc<Sigma_encl_arc):
         theta_E_max = theta[np.argmin(np.abs(Sigma_crit_min_arc-Sigma_encl_arc))]
-        plt.axvline(to_dimless(theta_E_max),label=r"$\theta_E(z_{s,max})$="+str(short_SciNot(theta_E_max)),ls="--",c="b")
-    plt.xlabel(r'$\theta$ ["]')
-    plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl_arc.unit)+"]")
-    plt.title(r"$\Sigma_{encl}$")
-    plt.legend()
-    plt.savefig(savenameSigmaEnc)
-    plt.close()
-    #plt.savefig("tmp/Sigma_enc.png")
-    print("Saving "+savenameSigmaEnc)
+        ax.axvline(to_dimless(theta_E_max),label=r"$\theta_E(z_{s,max})$="+str(short_SciNot(theta_E_max)),ls="--",c="b")
+    ax.set_xlabel(r'$\theta$ ["]')
+    ax.set_ylabel(r"$\Sigma$ ["+str(Sigma_encl_arc.unit)+"]")
+    ax.set_title(r"$\Sigma_{encl}$")
+    ax.legend()
+    #fig.savefig(savenameSigmaEnc)
+    #plt.close(fig)
+    #fig.savefig("tmp/Sigma_enc.png")
+    #print("Saving "+savenameSigmaEnc)
 
     # define the z_source_min:        
     z_source_min = _get_min_z_source(cosmo=Gal.cosmo,z_lens=Gal.z,
@@ -224,7 +225,7 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     if z_source_min==0:
         raise ProjectionError("This projection for this galaxy does not lead to a supercritical lens. Rerun trying different projection")
 
-    kw_zs_min = {"z_source_min":z_source_min,"plt_Sig":plt}
+    kw_zs_min = {"z_source_min":z_source_min,"fig_Sig":fig}
     return kw_zs_min
 
 def getDensAtRad(kw_2Ddens,rad):
@@ -258,12 +259,14 @@ def _get_min_z_source(cosmo,z_lens,thresh_dens,z_source_max,verbose=True):
         if verbose:
             print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
             plt.close()
-            plt.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
-            plt.xlabel(r"z$_{\text{source}}$")
-            plt.axhline(thresh_DsDds,ls="--",c="r",label=r"threshold(dens)*4$\pi$*G*$D_l$/c$^2$="+str( short_SciNot(thresh_DsDds)))
-            plt.legend()
+            fig_dsdds,ax = plt.subplots()
+            ax.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
+            ax.set_xlabel(r"z$_{\text{source}}$")
+            ax.axhline(thresh_DsDds,ls="--",c="r",label=r"threshold(dens)*4$\pi$*G*$D_l$/c$^2$="+str( short_SciNot(thresh_DsDds)))
+            ax.legend()
             name = "tmp/DsDds.pdf"
-            plt.savefig(name)
+            fig_dsdds.savefig(name)
+            plt.close(fig_dsdds)
             print("threshold density",short_SciNot(thresh_dens.value))
             print("Saved "+name)
         return 0
@@ -289,7 +292,7 @@ def get_MDfromAMRcells_PLL(AMR_cells):
     MD_value  = np.max(density)
     return MD_coords,MD_value
 
-def get_rough_thetaE_PLL(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR.png",path="tmp/",plt_Sig=None):
+def get_rough_thetaE_PLL(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR.png",path="tmp/",fig_Sig=None):
     # -> this should only be used for plotting
     # the idea is simple:
     # we want a very approximate idea of the theta_E of the galaxy
@@ -301,7 +304,7 @@ def get_rough_thetaE_PLL(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR
     Ds      = cosmo.angular_diameter_distance(z_source).to("Mpc")
     Dds     = cosmo.angular_diameter_distance_z1z2(z_lens,z_source).to("Mpc") 
     kw_Ddds = {"Dd":Dd,"Dds":Dds,"Ds":Ds}
-    return theta_E_from_AMR_densitymap_PLL(kw_2Ddens=kw_2Ddens,nm_sigmaplot=nm_sigmaplot,path=path,plt_Sig=plt_Sig,**kw_Ddds)
+    return theta_E_from_AMR_densitymap_PLL(kw_2Ddens=kw_2Ddens,nm_sigmaplot=nm_sigmaplot,path=path,fig_Sig=fig_Sig,**kw_Ddds)
 
 def cells2SigRad(kw_2Ddens):    
     xc,yc = kw_2Ddens["MD_coords"] #kpc
@@ -347,7 +350,7 @@ def cells2SigRad(kw_2Ddens):
     Sigma_encl = cumulative_mass/cumulative_area
     return r_sorted,Sigma_encl
     
-def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,plt_Sig=None,nm_sigmaplot="Sigma.png",path="tmp/"):
+def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigmaplot="Sigma.png",path="tmp/"):
     # Critical density
     Sigma_crit = (const.c**2 / (4*np.pi*const.G) * (Ds/(Dd*Dds))).to("Msun/kpc^2")
     # Physical scale of 1 arcsec at Dd
@@ -359,21 +362,22 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,plt_Sig=None,nm_sigma
 
     thetaE = np.interp(Sigma_crit.value, Sigma_encl.value[::-1], theta[::-1].value)*theta.unit
     print("theta_E_arcsec found",short_SciNot(np.round(thetaE,2)))
-    if plt_Sig is None:
-        plt.xlabel(r'$\theta$ ["]')
-        plt.ylabel(r"$\Sigma$ ["+str(Sigma_encl.unit)+"]")
-        plt.title(r"$\Sigma_{encl}$")
-        plt.plot(theta,Sigma_encl,c="k")
+    if fig_Sig is None:
+        fig,ax = plt.subplots(1)
+        ax.set_xlabel(r'$\theta$ ["]')
+        ax.set_ylabel(r"$\Sigma$ ["+str(Sigma_encl.unit)+"]")
+        ax.set_title(r"$\Sigma_{encl}$")
+        ax.plot(theta,Sigma_encl,c="k")
     else:
-        plt = plt_Sig
-    plt.axhline(Sigma_crit.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ ["+str(Sigma_crit.unit)+"]")
-    plt.axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="-",c="b")
-    plt.legend()
+        fig = fig_Sig
+    fig.axes[0].axhline(Sigma_crit.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ ["+str(Sigma_crit.unit)+"]")
+    fig.axes[0].axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="-",c="b")
+    fig.axes[0].legend()
     nm_savefig = path+"/"+nm_sigmaplot
     print("Saving "+nm_savefig)
-    plt.savefig(nm_savefig)
-    plt.savefig("tmp/Sig_enc.png")
-    plt.close()
+    fig.savefig(nm_savefig)
+    fig.savefig("tmp/Sig_enc.png")
+    plt.close(fig)
     return thetaE
     
 def Gal2MRADEC(Gal,proj_index,arcXkpc):
@@ -424,10 +428,8 @@ def get_2Dkappa_map(Gal,proj_index,MD_coords,SigCrit,kwargs_extents,arcXkpc=None
     return kappa
 
 
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.colors import  Normalize
-from matplotlib.cm import ScalarMappable
+
+
 
 def plot_amr_cells(kw_2Ddens):
     fig, ax = plt.subplots(figsize=(8,8))

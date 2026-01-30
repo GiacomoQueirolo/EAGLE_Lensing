@@ -1,17 +1,18 @@
-# I want to compute and plot the isondensity params for the lenses we have so far:
-
+"""
+Study the statistic of isodensity contours of available lenses
+"""
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
 from python_tools.tools import to_dimless
 from fnct import std_sim
-from Gen_PM_PLL_AMR import LoadLens,sim_lens_path
+from Gen_PM_PLL_AMR import LoadLens,sim_lens_path,default_savedir_sim
 from isophote4isodens_AMR import fit_isodens,plot_isodens
 
 if __name__=="__main__":
     # this directory structure has to be rechecked
-    savedir_sim="test_sim_lens_AMR"
+    savedir_sim=default_savedir_sim
     lenses = glob.glob(f"{sim_lens_path}/{std_sim}/snap*/{savedir_sim}/*.pkl")
     gamma_distr = [] 
     f_ellipt_distr = []

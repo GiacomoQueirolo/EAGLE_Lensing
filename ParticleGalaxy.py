@@ -11,6 +11,7 @@ import astropy.units as u
 from decimal import Decimal
 import matplotlib.pyplot as plt
 import astropy.constants as const
+from astropy.stats import sigma_clip
 from functools import cached_property 
 
 from python_tools.tools import mkdir
@@ -18,8 +19,9 @@ from python_tools.get_res import LoadClass
 from python_tools.get_res import load_whatever
 from astropy.cosmology import FlatLambdaCDM
 from get_gal_indexes import get_gals
+from get_gal_indexes import pkl_name as pkl_gals
 
-from fnct import _count_part,_mass_part,get_gal_path
+from fnct import gal_dir,_count_part,_mass_part,get_gal_path,gal_path2kwGal
 from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header
 
 # combination btw get_rnd_gal and _get_rnd_gal
@@ -29,14 +31,14 @@ min_z        = 0.2
 # max_z is implicitely =3.53
 min_mass     = 5e13 # Sol Mass
 def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),
-                        max_z="2",pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
+                        max_z="2",pkl_name=pkl_gals,check_prev=True,save_pkl=True):
     """Given the simulation, the range of redshift and minimum mass required, 
         returns a random galaxy from the simulation
     """
     min_mass = str(min_mass)
     min_z    = str(min_z)
     max_z    = str(max_z)
-    data  = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,
+    data     = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,
                      pkl_name=pkl_name,check_prev=check_prev,plot=False,save_pkl=save_pkl)
     index = np.arange(len(data["z"]))
     rnd_i = np.random.choice(index)
@@ -147,17 +149,25 @@ class PartGal:
     """Given the simulation, snap (or z) and galaxy numbers, set up a class
     with all the needed particle properties converted in physical units
     """
-    def __init__(self, Gn, SGn,M,Centre,sim=std_sim,z=None,snap=None): #,query="",CMx,CMy,CMz,M=None):
+    def __init__(self, Gn, SGn,sim=std_sim,z=None,snap=None,M=None,Centre=None): #,query="",CMx,CMy,CMz,M=None):
         self.sim    = sim
         z,snap      = get_z_snap(z,snap)
         self.snap   = snap
         self.z      = z
-        self.M      = M
         self.Gn     = Gn
         self.SGn    = SGn
         #Note: this is unique only within the snap
         self.Name   = f"G{Gn}SGn{SGn}" 
-        self.centre = Centre
+        # Mass and Centre can be recovered
+        kw_MCntr    = get_kwMCntr(Gn,SGn,sim=sim,snap=snap,)
+        _M          = kw_MCntr["M"]
+        _Centre     = kw_MCntr["Centre"]
+        if M is not None:
+            assert M == _M
+        if Centre is not None:
+            assert np.all(Centre == _Centre)
+        self.M      = _M
+        self.centre = _Centre
         self.a,self.h,self.boxsize = self.read_snap_header()
 
         # Define/Create Gal path
@@ -421,6 +431,7 @@ class PartGal:
         if not hasattr(self,"pkl_path"):
             self.pkl_path = f"{self.gal_snap_dir}/Gn{self.Gn}SGn{self.SGn}.pkl"
         return self.pkl_path
+        
     def set_gal_path(self):
         self.gal_path,self.gal_snap_dir = get_gal_path(self,ret_snap_dir=True)
         mkdir(self.gal_snap_dir)
@@ -436,8 +447,29 @@ class PartGal:
         print("Saved "+self.pkl_path)
 
 # this function is a wrapper for convenience - it takes the class itself as input
-def ReadGal(GAL,vebose=True):
-    return LoadClass(path=GAL.pkl_path,verbose=verbose)
+def ReadGal(Gal,vebose=True):
+    return LoadClass(path=Gal.pkl_path,verbose=verbose)
+
+def LoadGal(path,if_fail_recompute=True,verbose=True):
+    # Try loading galaxy - if fail and fail_recompute==True, try recomputing it
+    Gal = LoadClass(path=path,verbose=verbose)
+    if not Gal and if_fail_recompute:
+        kwGal = gal_path2kwGal(path)
+        Gal = PartGal(**kwGal)
+    return Gal
+    
+# to simplify the input: given the sim, z, and GnSgn, 
+# we get the mass and center of the galaxy for input of PartGal 
+
+def get_kwMCntr(Gn,SGn,sim=std_sim,z=None,snap=None,gal_dir=gal_dir,pkl_name=pkl_gals):
+    pkl_path = f"{gal_dir}/{pkl_name}" 
+    myData   = load_whatever(pkl_path)
+    z,snap   = get_z_snap(z,snap)
+    z = min(myData["z"], key=lambda x:abs(x-z))
+    index    = np.where((myData["Gn"]==Gn) & (myData["SGn"]==SGn) & (myData["z"]==z))[0][0]
+    kwMCntr  = {"M":myData["M"][index],
+               "Centre":np.array([myData["CMx"],myData["CMy"],myData["CMz"]]).T[index]}
+    return kwMCntr
 
 def get_rnd_PG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
                pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
@@ -448,11 +480,18 @@ def get_rnd_PG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
     z        = kw_gal["z"] 
     M        = kw_gal["M"] 
     Gn,SGn   = kw_gal["Gn"],kw_gal["SGn"]
-    Centre   = np.array([kw_gal["CMx"],kw_gal["CMy"],kw_gal["CMz"]])  
-    PG       = PartGal(Gn,SGn,M,Centre,std_sim,z)
+    Centre   = np.array([kw_gal["CMx"],kw_gal["CMy"],kw_gal["CMz"]]) 
+    kwGal    = {"z":z,"Gn":Gn,"SGn":SGn,"sim":sim,"M":M,"Centre":Centre}
+    PG       = PartGal(**kwGal)
     return PG
 
-
+def clip_coord(m,x,y,z,sigma=10):
+    # clip coordinates outliers
+    mask = np.ones(len(x),dtype=bool)
+    for coord in x,y,z:
+        mask *= np.invert(sigma_clip(coord,sigma=sigma).mask)
+    return m[mask],x[mask],y[mask],z[mask]
+    
 
 def Gal2MXYZ(Gal): 
     """Given the galaxy, return Masses (in Msun) and
@@ -473,6 +512,10 @@ def Gal2MXYZ(Gal):
     Xs = np.concatenate([Xstar,Xgas,Xdm,Xbh])*u.Mpc.to("kpc")*u.kpc #kpc
     Ys = np.concatenate([Ystar,Ygas,Ydm,Ybh])*u.Mpc.to("kpc")*u.kpc #kpc
     Zs = np.concatenate([Zstar,Zgas,Zdm,Zbh])*u.Mpc.to("kpc")*u.kpc #kpc
+
+    # clip particle outliers
+    Ms,Xs,Ys,Zs = clip_coord(Ms,Xs,Ys,Zs)
+    
     # center around the center of the galaxy
     # center of mass is given in Comiving coord 
     # see https://arxiv.org/pdf/1510.01320 D.23 

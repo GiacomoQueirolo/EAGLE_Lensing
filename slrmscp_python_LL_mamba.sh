@@ -26,6 +26,6 @@ export OMP_NUM_THREADS=1
 date "+%b %d%t%H:%M"
 echo python $@
 python $@
-date "+%b%d%t%H:%M"
+date "+%b %d%t%H:%M"
 echo "Done!" 
 

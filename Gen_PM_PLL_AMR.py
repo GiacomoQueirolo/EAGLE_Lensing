@@ -1,21 +1,13 @@
 """
-From randomly selected galaxies, read particles and produces lenses
+From randomly selected galaxies, read particles and GENerate Particles Lenses
 Revolves around the LensPart class, plus several helper functions
 """
-# copy from Gen_PM_PLL_AMR_01 12/12/25
-# "slim" the saved components - delete everything which is 1)heavy 2) easy to recompute
-# and re-compute it automatically when loading the class
 
-# lens_model_PART: is already present in imageModel.LensModel
-# Gal : can be re-loaded
-# PMLens : can be re-computed
-# cosmo : present in Gal, can be re-computed
-#imageModel: very heavy, can be re-computed
-# all outputs of setup_lenses are very fast to compute and heavy - mainly lens_model_PART
 import os,dill
 import numpy as np
 from copy import copy,deepcopy
 from functools import cached_property 
+from scipy.ndimage import zoom
 from scipy.interpolate import splprep, splev, RectBivariateSpline
 import astropy.units as u
 import astropy.constants as const
@@ -36,8 +28,12 @@ from lenstronomy.SimulationAPI.sim_api import SimAPI
 from python_tools.fwhm import get_fwhm
 from python_tools.get_res import load_whatever,LoadClass
 from python_tools.tools import mkdir,short_SciNot,to_dimless,ensure_unit
+# Get particle from galaxy catalogue
+from ParticleGalaxy import get_rnd_PG,Gal2kwMXYZ,LoadGal
+# particle lens class and params.
 from particle_lenses import PMLens 
-from ParticleGalaxy import get_rnd_PG,Gal2kwMXYZ
+from particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
+# project galaxy along various axis
 from project_gal_AMR import get_2Dkappa_map,prep_Gal_projpath,projection_main_AMR
 from project_gal_AMR import Gal2kw_samples,project_kw_parts,kwparts2arcsec,ProjectionError
 # cosmol. params.
@@ -55,10 +51,12 @@ z_source_max  = 4
 #minimum theta_E
 min_thetaE = .3*u.arcsec #arcsec
 
-# Path definition:
+# Path definitions:
 
 # define where to store the obtained lenses classes
-sim_lens_path = "/pbs/home/g/gqueirolo/EAGLE/sim_lens/"
+sim_lens_path       = "/pbs/home/g/gqueirolo/EAGLE/sim_lens/"
+default_savedir_sim = "test_sim_lens_AMR" # subdirectory depending on the lensing algorithm
+
 def get_lens_dir(Gal):
     lens_dir = f"{sim_lens_path}/{Gal.sim}/snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}/"
     mkdir(lens_dir)
@@ -76,12 +74,15 @@ def get_lens_dir(Gal):
 # source parametrisation
 kwargs_sersic_ellipse_basic = {'R_sersic': .1, 'n_sersic': 3, 
                             'center_x': 0,
-                             'center_y': 0, 
-                             'e1': 0.0, 'e2': 0.0}
-kwargs_sersic_ellipse = {'amp': 4000.}|kwargs_sersic_ellipse_basic
-kwargs_sersic_ellipse_mag = {'mag':25.}|kwargs_sersic_ellipse_basic
-source_model_list = ['SERSIC_ELLIPSE']
+                            'center_y': 0, 
+                            'e1': 0.0, 
+                            'e2': 0.0}
+kwargs_sersic_ellipse     = {'amp': 4000.}|kwargs_sersic_ellipse_basic
+kwargs_sersic_ellipse_mag = {'magnitude':25.}|kwargs_sersic_ellipse_basic
+kwargs_source_default     = kwargs_sersic_ellipse_mag
+source_model_list         = ['SERSIC_ELLIPSE']
 
+"""
 def get_LensSystem_kwrgs(Sim):
     # data specifics
     print("Pixel_num: ",  Sim.numpix)
@@ -97,30 +98,6 @@ def get_LensSystem_kwrgs(Sim):
     kwargs_numerics    = {'supersampling_factor': 1, 'supersampling_convolution': False}
 
     return data_class, psf_class, source_model_class, kwargs_numerics, kwargs_source_list
-    
-def get_LensSystem_kwrgs_old(deltaPix,pixel_num=pixel_num,
-                         background_rms=None,exp_time=None,
-                         ra_source=0.,dec_source = 0.,source_model_list=source_model_list):
-    # data specifics
-    # background noise per pixel
-    # exposure time (arbitrary units, flux per pixel is in units #photons/exp_time unit)
-    print("Pixel_num: ",  pixel_num)
-    print("DeltaPix: ",  np.round(deltaPix,3))
-    deltaPix    = to_dimless(deltaPix,True) # if dimensional, convert to dimensionless
-    kwargs_data = sim_util.data_configure_simple(pixel_num, deltaPix, exp_time, background_rms)
-    data_class  = ImageData(**kwargs_data)
-    kwargs_psf  = {'psf_type': 'NONE'}  
-    psf_class   = PSF(**kwargs_psf)
-    # Source Params
-    source_model_class,kwargs_source_list = get_model_source(ra_source,dec_source,source_model_list=source_model_list)
-    kwargs_numerics = {'supersampling_factor': 1, 'supersampling_convolution': False}
-
-    # for modelling later:
-    multi_band_list = [[kwargs_data, kwargs_psf, kwargs_numerics]]
-    kwargs_data_joint = {'multi_band_list': multi_band_list, 
-                     'multi_band_type': 'single-band'}
-    return data_class, psf_class, source_model_class, kwargs_numerics, kwargs_source_list,kwargs_data_joint
-
 
 def get_model_source(ra_source=0,dec_source=0,
                      source_model_list=source_model_list,_kwargs_source=kwargs_sersic_ellipse):
@@ -131,31 +108,31 @@ def get_model_source(ra_source=0,dec_source=0,
     kwargs_source_list = [_kwargs_source]
     source_model_class = LightModel(light_model_list=source_model_list)
     return source_model_class,kwargs_source_list
+"""
 
-def get_kwargs_sourceSim(Sim,kwargs_source=kwargs_sersic_ellipse_mag):
-    if "mag" in kwargs_source.keys():
+def get_kwargs_sourceSim(Sim,kwargs_source=kwargs_source_default):
+    if "magnitude" in kwargs_source.keys():
+        kwargs_source_list       = [kwargs_source]
         # the following only depends on -kwargs_source_params, -magnitude_0_point -source_model_list
-        _, kwargs_source, _ = Sim.magnitude2amplitude(kwargs_source_mag = kwargs_source)
+        _, kwargs_source_list, _ = Sim.magnitude2amplitude(kwargs_source_mag = kwargs_source_list)
+        kwargs_source            = kwargs_source_list[0]
     return kwargs_source
 
-def get_dataclasses(Sim):
+def get_dataclasses(Sim,kwargs_source=kwargs_source_default):
         print("Pixel_num: ",  Sim.numpix)
         print("DeltaPix: ",   np.round(Sim.pixel_scale,3))
-        data_class  = Sim.data_class
-        psf_class   = Sim.psf_class
-        kwargs_numerics = {'supersampling_factor': 1, 'supersampling_convolution': False}
+        data_class         = Sim.data_class
+        psf_class          = Sim.psf_class
+        kwargs_numerics    = {'supersampling_factor': 1, 'supersampling_convolution': False}
         # Source Params
         source_model_class = Sim.source_model_class
         kwargs_source      = get_kwargs_sourceSim(Sim)    
         return data_class,psf_class,source_model_class,kwargs_numerics,kwargs_source
+
 ##########################
 # Model class for parts. #
 ##########################
-# particle lens params.
-#from particle_lenses import kwlens_part_PM
-from particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
-
-# kwargs of ultra-performing band for default simulated images
+# kwargs of ultra-performing band for default simulated images -> quite arbitrary, possibly to improve
 kwargs_band_sim = {'read_noise': 0, # no RN noise
  'pixel_scale': None,               # to update depending on the lens
  'ccd_gain': 2.5,             # standard gain for HST
@@ -167,19 +144,16 @@ kwargs_band_sim = {'read_noise': 0, # no RN noise
 
 class LensPart(): 
     def __init__(self,
-                    Galaxy,
-                    kwlens_part, # if PM or AS, and if so size of the core
-                    pixel_num=pixel_num, # sim prms 
-                    z_source_max  = z_source_max,     # for z_source sampling
-                    min_thetaE = min_thetaE,
-                    source_model_list=source_model_list, # this might not be the most efficient way to do it..
-                    kwargs_band_sim=kwargs_band_sim,
-                    #z_lens=z_lens,z_source=z_source,cosmo=cosmo, # cosmo prms -> obtained from Galaxy 
-                    #exp_time=1500, #sec. (~<exp_time> for J1433 opt. HST obs ) -> will be defined later
-                    #bckg_rms=0.006, #count (~ from f814w) observation parameters
-                    savedir_sim="lensing",
-                    reload=True # reload previous lens
-                    ):
+                 Galaxy,
+                 kwlens_part, # if PM or AS, and if so size of the core
+                 pixel_num=pixel_num, # sim prms 
+                 z_source_max  = z_source_max,     # for z_source sampling
+                 min_thetaE = min_thetaE,
+                 source_model_list=source_model_list, # this might not be the most efficient way to do it..
+                 kwargs_band_sim=kwargs_band_sim,
+                 savedir_sim="lensing",
+                 reload=True # reload previous lens
+                 ):
         Galaxy             = prep_Gal_projpath(Galaxy) # just set up some directories
         # setup of data
         self.Gal           = Galaxy
@@ -205,9 +179,6 @@ class LensPart():
         self.cosmo         = self.Gal.cosmo
         self.arcXkpc       = self.cosmo.arcsec_per_kpc_proper(self.z_lens)
 
-        # source model - probably to improve
-        self.source_model_list = source_model_list
-
         # To obtain the z_source and projection index 
         #-> computed only once in the run function
         self.z_source_max  = z_source_max        
@@ -215,8 +186,11 @@ class LensPart():
         
         # observational params
         self.kwargs_band_sim     = kwargs_band_sim
-        self.kwargs_source_model = {"source_light_model_list":self.source_model_list}
-        self.Sim = None # will be initialised with kwargs_band_sim once we have the correct deltaPix
+        # source model - probably to improve
+        self.kwargs_source_model = {"source_light_model_list":source_model_list,
+                                   "cosmo":self.cosmo
+                                   }
+        #self.Sim = None  will be initialised with kwargs_band_sim once we have the correct deltaPix
         self._setup_names()
 
     ### Class Structure ####
@@ -267,8 +241,8 @@ class LensPart():
         """
         state = self.__dict__.copy()
         # Large / recomputable lensing structures
-        state.pop('kwargs_lens_PART', None)
-        state.pop('lens_model_PART', None)
+        state.pop('kwargs_lens', None)
+        state.pop('lens_model', None)
         state.pop('kw_shear',None)
         state.pop('imageModel',None)
         # These are reloaded / reconstructed
@@ -301,7 +275,7 @@ class LensPart():
         before serialization.
         """
         # reload Galaxy
-        Galaxy = LoadClass(self.Gal_path)
+        Galaxy = LoadGal(self.Gal_path)
         Galaxy = prep_Gal_projpath(Galaxy)
         self.Gal   = Galaxy
         self.cosmo = Galaxy.cosmo
@@ -311,12 +285,12 @@ class LensPart():
         self.PMLens.setup(self)
         
         # Rebuild lens model if missing
-        if not hasattr(self, "lens_model_PART"):
+        if not hasattr(self, "lens_model"):
             self.setup_lenses()
 
         # Rebuild image model
         if not hasattr(self, "imageModel"):
-            self.get_imageModel()
+            self.set_imageModel()
         
     def unpack(self):
         """Public wrapper for lazy reconstruction.
@@ -382,7 +356,7 @@ class LensPart():
         if read_prev:
             upload_successful = self.upload_prev()
         if not upload_successful:
-            # Read particles ONLY ONCE
+            # Read particles ONCE
             # kwargs of Msun, XYZ in kpc (explicitely) centered around Centre of Mass (CM)
             kw_parts         = Gal2kwMXYZ(self.Gal) 
             # Compute projection
@@ -406,7 +380,7 @@ class LensPart():
             self.SigCrit       = SigCrit(cosmo=self.cosmo,z_lens=self.z_lens,z_source=self.z_source) # Msun/kpc^2
 
             self.PMLens.setup(self) # only run now bc it needs z_source 
-            # Then define the radius based on ~ theta_E
+            # Define the radius based on ~ theta_E
             scale_tE       = 2 
             self.radius    = self.thetaE*scale_tE
             if verbose:
@@ -416,27 +390,32 @@ class LensPart():
             self.deltaPix    = Diam_arcsec/self.pixel_num # ''/pix
             # update kwargs_band_sim:
             self.kwargs_band_sim["pixel_scale"] = to_dimless(self.deltaPix)
-            # update self.Sim
+            # define Sim for the lens computations
             # self.Sim DOES NOT contain lensing information, it's used only partially and carefully
-            self.Sim = SimAPI(numpix=self.pixel_num,kwargs_single_band=self.kwargs_band_sim,kwargs_model=self.kwargs_source_model)
+            self.Sim = SimAPI(numpix=self.pixel_num,
+                              kwargs_single_band=self.kwargs_band_sim,
+                              kwargs_model=self.kwargs_source_model,
+                              )
             # in a similar way a posterior SimObs can be used to create images given different telescopes
-            # the following should not matter, but for cleanliness:
-            self.Sim._cosmo = self.cosmo
             
             # setup dataclasses (dataclass,psf_class,sourcemodel and some helper kwargs):
             self.setup_dataclasses()
             # setup imageModel:
-            self.get_imageModel()
+            self.set_imageModel()
             # setup lenses 
             self.setup_lenses()
-            # this is the most computationally intense function:
+            # compute alpha map (most computationally intense function):
+            self.alpha_map
+            self.sample_source_pos(update=True)
             self.image_sim  = self.get_lensed_image()
             self.store()
             # Assuming that if we got here, everything worked out fine:
             self.Gal.update_is_lens(islens=True,message="No issues")
 
-    def setup_dataclasses(self):
-        self.data_class,self.psf_class,self.source_model_class,self.kwargs_numerics,self.kwargs_source = get_dataclasses(self.Sim)
+    def setup_dataclasses(self,Sim=None):
+        if Sim is None:
+            Sim = self.Sim
+        self.data_class,self.psf_class,self.source_model_class,self.kwargs_numerics,self.kwargs_source = get_dataclasses(Sim)
         return 0
         
     def update_source_position(self,ra_source,dec_source):
@@ -455,9 +434,9 @@ class LensPart():
         samples    = kw_samples["RAs"],kw_samples["DECs"]
         Ms         = kw_samples["Ms"]
         # Convert in lenses parameters 
-        kwLns_PART,LnsMod_PART = self.PMLens.get_lens_PART(samples=samples,Ms=Ms)
-        self.kwargs_lens_PART  = kwLns_PART
-        self.lens_model_PART   = LnsMod_PART
+        kwLnsPart,LnsModPart   = self.PMLens.get_lens_PART(samples=samples,Ms=Ms)
+        self.kwargs_lens       = kwLnsPart
+        self.lens_model        = LnsModPart
         return 0
         
     def sample_z_source(self,z_source_min,z_source_max):
@@ -466,20 +445,32 @@ class LensPart():
         z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
         return z_source
         
-    def get_lensed_image(self,unconvolved=True,update_source_pos=True):
+    def get_lensed_image(self,imageModel=None,sourceModel=None,kwargs_source=None,\
+                         unconvolved=True):
         self.unpack()
-        imageModel   = self.imageModel
-        # for now only one profile - we could think of generalising it for multiples
-        sourceModel  = self.source_model_class
-        x_source,y_source = self.sample_source_pos(update=update_source_pos)
+        if sourceModel is None:
+            sourceModel  = self.source_model_class
+        if kwargs_source is None:
+            kwargs_source = self.kwargs_source                
+        if imageModel is None:
+            imageModel   = self.imageModel
         
         x_source_plane,y_source_plane = self.get_xy_source_plane()
-        source_light = sourceModel.surface_brightness(x_source_plane, y_source_plane, self.kwargs_source, k=None)
+        kwargs_source_list = [kwargs_source]
+        source_light = sourceModel.surface_brightness(x_source_plane, y_source_plane, kwargs_source_list, k=None)
+        if not np.abs(imageModel.Data.pixel_width-self.deltaPix.value)<1e-10:
+            if imageModel.Data.pixel_width<self.deltaPix.value:
+                raise RuntimeError("Simulated observatory cannot have higher resolution than baseline simulation") 
+            # different pixel scale (due different simulated observatory)
+            source_light_im = util.array2image(source_light)
+            pixel_num_aim = imageModel.ImageNumerics.grid_class.num_grid_points_axes[0]
+            source_light_downgrade = zoom(source_light_im,pixel_num_aim/self.pixel_num)
+            source_light = util.image2array(source_light_downgrade)
         image_sim    = imageModel.ImageNumerics.re_size_convolve(source_light, unconvolved=unconvolved)
-        # imageModel.image(self.kwargs_lens_PART, self.kwargs_source, kwargs_lens_light=None, kwargs_ps=None)
         return image_sim
 
-    def sample_source_pos(self,update=True):
+
+    def sample_source_pos(self,update=False):
         """Sample the source position within the tangential
         critical caustic
         """
@@ -512,27 +503,37 @@ class LensPart():
         y_source_plane = util.image2array(y_source_plane)
         return x_source_plane,y_source_plane
         
-    def get_imageModel(self,Sim):
-        if not hasattr(self, "data_class"):
+    def get_imageModel(self,Sim=None):
+        if not hasattr(self, "kwargs_numerics"):
             self.setup_dataclasses()
-        if not hasattr(self, "lens_model_PART"):
+        if not hasattr(self, "lens_model"):
             self.setup_lenses()
-        self.imageModel = ImageModel(self.data_class, self.psf_class, 
-                            self.lens_model_PART, 
-                            self.source_model_class,
+            
+        if Sim is None or Sim==self.Sim:
+            Sim = self.Sim
+            if not hasattr(self, "data_class"):
+                self.setup_dataclasses()
+            data_class = self.data_class
+            psf_class = self.psf_class
+            source_model_class = self.source_model_class
+        else:
+            data_class,psf_class,source_model_class,_,_ = get_dataclasses(Sim)
+        
+        imageModel = ImageModel(data_class, psf_class, 
+                            self.lens_model, 
+                            source_model_class,
                             lens_light_model_class=None,point_source_class=None, 
                             kwargs_numerics=self.kwargs_numerics)
+        return imageModel
+        
+    def set_imageModel(self):
+        self.imageModel = self.get_imageModel(self.Sim)
         return self.imageModel
     
     @cached_property
     def alpha_map(self):
         return self._alpha_map(_radec=None)
-    @cached_property 
-    def _psi_map(self):
-        # this is not meant to be computed in the run function, so we have yet
-        # another wrapper function around it to ensure its results are stored
-        # after computation (see @property def psi_map)
-        return self.compute_psi_map(_radec=None)
+
     @cached_property
     def kappa_map(self):
         return self._kappa_map(_radec=None)
@@ -547,7 +548,7 @@ class LensPart():
             # equivalent to np.reshape(np.array(self.data_class.pixel_coordinates),(2,self.pixel_num*self.pixel_num))
             _radec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
         _ra,_dec = _radec
-        psi = self.lens_model_PART.potential(_ra, _dec, self.kwargs_lens_PART)
+        psi = self.lens_model.potential(_ra, _dec, self.kwargs_lens)
         psi = util.array2image(psi)
         return psi
         
@@ -557,7 +558,7 @@ class LensPart():
         if _radec is None:
             _radec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
         _ra,_dec = _radec
-        alpha_x,alpha_y = self.lens_model_PART.alpha(_ra, _dec, self.kwargs_lens_PART)
+        alpha_x,alpha_y = self.lens_model.alpha(_ra, _dec, self.kwargs_lens)
         alpha_x,alpha_y = util.array2image(alpha_x),util.array2image(alpha_y)
         return alpha_x,alpha_y
         
@@ -568,7 +569,7 @@ class LensPart():
         if _radec is None:
             _radec = self.imageModel.ImageNumerics.coordinates_evaluate #arcsecs  
         _ra,_dec = _radec
-        kappa = self.lens_model_PART.kappa(_ra, _dec, self.kwargs_lens_PART)
+        kappa = self.lens_model.kappa(_ra, _dec, self.kwargs_lens)
         kappa = util.array2image(kappa)
         return kappa
         
@@ -583,16 +584,32 @@ class LensPart():
         kappa = get_2Dkappa_map(Gal=self.Gal,proj_index=self.proj_index,MD_coords=self.MD_coords,kwargs_extents=kw_extents,
                                 SigCrit=self.SigCrit,arcXkpc=self.arcXkpc)
         return kappa
+    """
     @property
     def psi_map(self):
         # if psi_map has not been computed yet, computes it
         # and stores it
         # if it has, just returns the values
-        if not hasattr(self, "_psi_map"):
+        if "_psi_map" not in self.__dict__: #must be in this version!
             _ = self._psi_map
             self.store()
         return self._psi_map
+    @cached_property 
+    def _psi_map(self):
+        # this is not meant to be computed in the run function, so we have yet
+        # another wrapper function around it to ensure its results are stored
+        # after computation (see @property def psi_map)
+        return self.compute_psi_map(_radec=None)
+    """
     
+    @cached_property
+    def psi_map(self):
+        psi = self.compute_psi_map(_radec=None)
+        self.store()
+        return psi
+    #
+    # Coordinates 
+    # 
     @property
     def kw_extents(self):
         _radec = self.imageModel.ImageNumerics.coordinates_evaluate
@@ -627,65 +644,43 @@ class LensPart():
     # Simulating observations: 
 
     # band will have to have also psf information!
-    def set_SimObs(band=None):
-        kwargs_model = {"z_source":self.z_source,
-                        "source_light_model_list":self.source_model_list
-                       }
-        self.band = band # so we know which one it is running
-        if band is not None:
-            # realistic observation
-            kwargs_band = band.kwargs_single_band()
-            # must recompute pixel_num in order to covert the same aperture,
-            # but with the new resolution 
-            # -> round down to be sure we are within the bounds
-            pixel_num = int(to_dimless(2*self.radius)/kwargs_band["pixel_scale"])
-        else:
-            # this is the ultra-refined band -> default sim with highest resolution
-            kwargs_band = self.kwargs_band_sim
-            pixel_num   = self.pixel_num
-        #call the simulation API class
-        self.SimObs = SimAPI(numpix = pixel_num, # number of pixels we want in our image
-                     kwargs_single_band = kwargs_band, # give the SimAPI class the keyword arguments for HST that we got above
-                     kwargs_model = kwargs_model)
+    def get_SimObs(self,band,kwargs_source_model=None):
+        if kwargs_source_model is None:
+            kwargs_source_model = self.kwargs_source_model
+        kwargs_model = {"z_source":self.z_source} | kwargs_source_model
+        if not "cosmo" in kwargs_model.keys():
+            # cosmology should in principle not be used, but better be consistent
+            kwargs_model["cosmo"] = self.cosmo
+        #self.bandObs = band # so we know which one it is running
         
-        return self.SimObs
+        # realistic observation
+        kwargs_single_band = band.kwargs_single_band()
+        # must recompute pixel_num in order to covert to ~ the same aperture,
+        # but with the new resolution 
+        # -> round down to be sure we are within the bounds
+        pixel_num = int(to_dimless(2*self.radius)/kwargs_single_band["pixel_scale"])
+        
+        # instantiate simulation API class
+        SimObs = SimAPI(numpix = pixel_num, # N of pixels in "observed" image
+                     kwargs_single_band = kwargs_single_band, # telescope specific keyword arguments (eg HST, see above)
+                     kwargs_model = kwargs_model,# kwargs source model (in principle kw lens as well)
+                    )
+        return SimObs
 
-    
-    def get_imageModelObs(self):
-        # contrary to the stnd. get_imageModel (used to compute lensing params and sim image),
-        # this is used ONLY to create realistic observations from it (no lensing recomputation)
-        if not hasattr(self, "data_classObs"):
-            self.setup_dataclassesObs()
-        self.imageModelObs = ImageModel(data_class= self.data_classObs, 
-                                        psf_class = psf_self.psf_classObs, 
-                        source_model=self.source_model_class,
-                        lens_model=None, #this is only used to replot the image, alpha map already computed 
-                        lens_light_model_class=None,point_source_class=None, 
-                        kwargs_numerics=self.kwargs_numerics) # for now numerics stay the same
-        return self.imageModelObs
-        
-    def setup_dataclassesObs(self,ra_source=0,dec_source=0):
-        self.data_classObs,self.psf_classObs,self.source_model_classObs,_, self.kwargs_sourceObs = get_dataclasses(self.SimObs)
-        return 0
-        
-    # deal with SIM API by considering
-    # input: band and PSF
-    # used to produce realistic images
-    def get_lensed_imageObs(self):
-        self.unpack()
-        sourceModel  = self.source_model_classObs
-        imageModel   = self.imageModelObs
-        x_source_plane,y_source_plane = self.get_xy_source_plane()
-        source_light = sourceModel.surface_brightness(x_source_plane, y_source_plane, self.kwargs_sourceObs, k=None)
-        image_simObs = imageModel.ImageNumerics.re_size_convolve(source_light, unconvolved=False)
+    # TODO: test speed and thus think about storing results
+    def sim(self,band,kwargs_source_model=None):
+        """Obtain simulated images given band specific and kwargs_source_model 
+        """
+        SimObs           = self.get_SimObs(band,kwargs_source_model)
+        imageModelObs    = self.get_imageModel(Sim=SimObs)
+        sourceModelObs   = SimObs.source_model_class
+        kwargs_sourceObs = get_kwargs_sourceSim(SimObs)    
+
+        image_simObs     = self.get_lensed_image(imageModel=imageModelObs,
+                                             sourceModel=sourceModelObs,
+                                             kwargs_source=kwargs_sourceObs,
+                                             unconvolved=False)
         return image_simObs
-
-    def sim(band):
-        self.set_SimObs(band)
-        self.get_imageModelObs()
-        image_simObs = self.get_lensed_imageObs()
-        
-    
     ################
     ################
 
@@ -974,9 +969,12 @@ def wrapper_get_rnd_lens(reload=True):
     """
     while True:
         Gal = get_rnd_PG()
-        mod_LP = LensPart(Galaxy=Gal,kwlens_part=kwlens_part_AS,
-                           z_source_max=z_source_max, 
-                           pixel_num=pixel_num,reload=reload,savedir_sim="test_sim_lens_AMR")
+        mod_LP = LensPart(Galaxy=Gal,
+                          kwlens_part=kwlens_part_AS,
+                          z_source_max=z_source_max, 
+                          kwargs_band_sim=kwargs_band_sim,
+                          pixel_num=pixel_num,reload=reload,
+                          savedir_sim=default_savedir_sim)
         try:
             mod_LP.run()
             break
@@ -987,5 +985,5 @@ def wrapper_get_rnd_lens(reload=True):
 
 
 if __name__ == "__main__":
-    print("Do not run this script, but tests/test_Gen_PM_PLL_AMR.py")
+    print("Do not run this script, but test/test_Gen_PM_PLL_AMR.py")
     exit()
