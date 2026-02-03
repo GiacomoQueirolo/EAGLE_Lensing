@@ -1,7 +1,12 @@
+"""
+Random bazar of useful functions for the reading of particles for galaxies
+"""
 import glob
 import h5py
 import pickle
 import numpy as np
+# Implement path handling 
+from pathlib import Path
 
 from python_tools.get_res import load_whatever
 from python_tools.tools import mkdir,to_dimless
@@ -16,24 +21,21 @@ from python_tools.tools import mkdir,to_dimless
 #                            |_Gals
 #                                |_snaphots_of_gals (obtained from particles)
 
-# TODO: implement path handling with 
-#from pathlib import Path
 
 # data path
-part_data_path = "/pbs/home/g/gqueirolo/EAGLE/data/"
+part_data_path = Path("/pbs/home/g/gqueirolo/EAGLE/data/")
 # "Standard" simulation
 std_sim  = "RefL0025N0752"
 # use the following simulation only as test case
 test_sim = "RefL0012N0188"
-sim_path = part_data_path+std_sim+"/"
+sim_path = part_data_path/std_sim
 # Where to store the galaxies
-gal_dir = sim_path+"/Gals"
+gal_dir = sim_path/"Gals"
 mkdir(gal_dir)
 
 def galdir2sim(gal_dir):
-    _sim_path = gal_dir.replace(part_data_path,"")
-    sim_path  = _sim_path.replace("/Gals","")
-    sim       = sim_path.replace("/","")
+    sim_path = gal_dir.parent
+    sim      = str(sim_path.name)
     return sim
 # from https://dataweb.cosma.dur.ac.uk:8443/eagle-snapshots/
 # valid fo all sims apart the variable IMF runs
@@ -92,12 +94,12 @@ def get_files(sim,z=None,snap=None,_i_="*"):
     If no redshift/snapshots are defined, take all of them
     """
     
-    sim_path = part_data_path+"/"+sim
+    sim_path = part_data_path/sim
     # find the files
     _i_ = str(_i_)
     pstring = "???"
     suffix = "p"+pstring+"."+_i_+".hdf5"
-    prefix = sim_path+"/snapshot_"
+    prefix = sim_path/"snapshot_"
     if z is None and snap is None:
         # take all snapshots/all redshifts
         snap ="0??"
@@ -111,15 +113,14 @@ def get_files(sim,z=None,snap=None,_i_="*"):
             snap = get_snap(z)
         elif snap is not None:
             #zstr = str(get_z(snap))
-            pth   = prefix+prepend_str(snap,ln_str=3,fill="0")+"_z*"
-            _zstr = glob.glob(pth)
+            _zstr = prefix.glob(prepend_str(snap,ln_str=3,fill="0")+"_z*")
             assert len(_zstr)==1
             zstr  = _zstr[0].split("_z")[1].split("p")[0]
         snap = prepend_str(snap,ln_str=3,fill="0")
         zstr = prepend_str(zstr,ln_str=3,fill="0")
     
     fix  = f"{snap}_z{zstr}p{pstring}/snap_{snap}_z{zstr}"
-    file_string = prefix+fix+suffix
+    file_string = f"{prefix}{fix}{suffix}"
     files = glob.glob(file_string)
     # checking that the files are not empty
     assert files != []
@@ -145,38 +146,7 @@ def _count_part(part):
     return len(part["mass"])
 
 def _mass_part(part):
-    return np.sum(part["mass"])
-
-
-def get_gal_path(Gal,ret_snap_dir=False,gal_dir=gal_dir):
-    """Extract the path of the galaxy and the snap subdirectory
-    """
-    try:
-        gal_path,gal_snap_dir =  Gal.gal_path,Gal.gal_snap_dir
-    except:
-        gal_snap_dir = f"{gal_dir}/snap_{Gal.snap}/"
-        gal_path = f"{gal_snap_dir}/{Gal.Name}.pkl"
-    if ret_snap_dir:
-        return gal_path,gal_snap_dir
-    return gal_path
-
-def gal_path2kwGal(gal_path):
-    kw_gal    = {}
-    gal_dir   = gal_path.split("/snap_")[0]
-    base_path = gal_path.split(gal_dir)[1]
-    base_path = base_path[1:].replace("//","/")
-    str_snap,str_gal_name = base_path.split("/")
-    snap     = str_snap.replace("snap_","")
-    gal_name = str_gal_name.replace(".pkl","")
-    sGn,SGn  = gal_name.split("SGn")
-    Gn       = sGn.replace("Gn","")
-    kw_gal["Gn"]   = int(Gn)
-    kw_gal["SGn"]  = int(SGn)
-    kw_gal["snap"] = str(snap)
-    kw_gal["sim"]  = str(galdir2sim(gal_dir))
-    # M,center not necessary
-    return kw_gal
-    
+    return np.sum(part["mass"])   
 ################################
 
 def sersic_brightness(x,y,n=4,I=10,cntx=0,cnty=0,pa=0,q=1,Re=5.0):

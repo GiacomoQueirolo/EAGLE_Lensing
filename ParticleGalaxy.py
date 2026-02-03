@@ -7,8 +7,10 @@ import glob
 import dill
 import h5py
 import numpy as np
+from pathlib import Path
 import astropy.units as u
 from decimal import Decimal
+from datetime import datetime
 import matplotlib.pyplot as plt
 import astropy.constants as const
 from astropy.stats import sigma_clip
@@ -19,27 +21,27 @@ from python_tools.get_res import LoadClass
 from python_tools.get_res import load_whatever
 from astropy.cosmology import FlatLambdaCDM
 from get_gal_indexes import get_gals
-from get_gal_indexes import pkl_name as pkl_gals
 
-from fnct import gal_dir,_count_part,_mass_part,get_gal_path,gal_path2kwGal
+from fnct import gal_dir,galdir2sim,_count_part,_mass_part
 from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header
 
 # combination btw get_rnd_gal and _get_rnd_gal
 z_source_max = 4
 verbose      = True
-min_z        = 0.2
+min_z        = 0.02
+max_z        = 2
 # max_z is implicitely =3.53
-min_mass     = 5e13 # Sol Mass
+min_mass     = 1e12 # Sol Mass
 def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),
-                        max_z="2",pkl_name=pkl_gals,check_prev=True,save_pkl=True):
+                        max_z=str(max_z),check_prev=True,save_pkl=True):
     """Given the simulation, the range of redshift and minimum mass required, 
         returns a random galaxy from the simulation
     """
     min_mass = str(min_mass)
     min_z    = str(min_z)
     max_z    = str(max_z)
-    data     = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,
-                     pkl_name=pkl_name,check_prev=check_prev,plot=False,save_pkl=save_pkl)
+    data     = get_gals(sim=sim,min_mass=min_mass,max_z=max_z,min_z=min_z,\
+                        check_prev=check_prev,plot=False,save_pkl=save_pkl)
     index = np.arange(len(data["z"]))
     rnd_i = np.random.choice(index)
     kw = {}
@@ -50,129 +52,60 @@ def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),
             kw[k] = data[k][rnd_i]
     return kw
 
-def basic_get_radius(RAs,DECs):
-    """define a "radius" (more like 1/2 of the edge-lenght) of the grid
-    used to sample the density
+# from path to kw of Gal
+def gal_path2kwGal(gal_pkl_path):
+    """From path extract the required inputs for PartGal class
     """
-    # We want to have the same pixelscale in the 2Dim
-    # the obvioious way would give RA and DEC that might not be on the same range
-    # but we create a grid with the same number of points for both
-    # we rather would go as such: redefine the ranges such that the number of pixels 
-    # and the ranges are the same (but there might be some empty, ie 0 density, pixels
-    # for either of the two dimensions)
-    ramin  = RAs.min()
-    ramax  = RAs.max()
-    #rangeRa = ramax - ramin
-    decmin = DECs.min()
-    decmax = DECs.max()
-    #rangeDec = decmax-decmin
-    # we have the advantage that the center is set to 0 ->
-    radius =  max([0-ramin,ramax-0,0-decmin,decmax-0])
-    # verify:
-    assert(ramin>=-radius)
-    assert(decmin>=-radius)
-    assert(ramax<=radius)
-    assert(decmax<=radius)
-    return radius
-
-def get_radius(RAs,DECs,sigmas=6):
-    # cut-out outlier particles 
-    rad_max = basic_get_radius(RAs,DECs)
-    # we take 6 <sigmas> of 
-    rad_min = sigmas*(np.std(RAs)+np.std(DECs))/2
-    return np.min([rad_max,rad_min])
-
-def get_z_source(cosmo,z_lens,dens_Ms_kpc2,z_source_max=z_source_max,verbose=verbose):
-    # the lens has to be supercritical
-    # dens>Sigma_crit = (c^2/4PiG D_d(z_lens) ) D_s(z_source)/D_ds(z_lens,z_source)
-    # -> D_s(z_source)/D_ds(z_lens,z_source) < 4PiG D_d(z_lens) *dens/c^2
-    # D_s(z_source)/D_ds(z_lens,z_source) is not easy to compute analytically, but we can sample it
-    if z_lens>z_source_max:
-        raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
-        #return 0
-    try:
-        dens_Ms_kpc2.value
-    except:
-        # dens_Ms_kpc2 is already given in Msun/kpc^2
-        dens_Ms_kpc2 *= u.Msun/(u.kpc**2)
-    assert dens_Ms_kpc2.unit==u.solMass/(u.kpc**2)
-
-    max_DsDds = np.max(dens_Ms_kpc2)*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
-    max_DsDds = max_DsDds.to("") # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
-    max_DsDds = max_DsDds.value # dimensionless
-    #z_source_range = np.linspace(z_lens,z_source_max,100) # it's a very smooth funct->
-    min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
-    min_DsDds = min_DsDds.to("") # dimensionless
-    min_DsDds = min_DsDds.value
+    gal_pkl_path = Path(gal_pkl_path)
+    kw_gal       = {} 
+    str_snap     = gal_pkl_path.parent.name
+    snap         = str_snap.replace("snap_","")
+    str_gal_name = gal_pkl_path.name
+    gal_name     = str_gal_name.replace(".pkl","")
+    sGn,SGn      = gal_name.split("SGn")
+    Gn           = sGn.replace("Gn","")
+    kw_gal["Gn"]   = int(Gn)
+    kw_gal["SGn"]  = int(SGn)
+    kw_gal["snap"] = str(snap)
+    kw_gal["sim"]  = str(galdir2sim(gal_dir))
+    # M,center not necessary
+    return kw_gal
     
-    z_source_range = np.linspace(z_lens+0.09,z_source_max,100) # it's a very smooth funct->
-    DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
-    if not min_DsDds<max_DsDds:
-        # to do: deal with this kind of output
-        if verbose:
-            print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
-            plt.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
-            plt.xlabel(r"z$_{\text{source}}$")
-            plt.axhline(max_DsDds,ls="--",c="r",label=r"max(dens)*4$\pi$*G*$D_l$/c$^2$")
-            plt.legend()
-            name = "tmp/DsDds.pdf"
-            plt.savefig(name)
-            print("Saved "+name)
-        return 0
-    else:
-        # note that the successful test means only that there is AT LEAST 1 PIXEL that is supercritical
-        minimise     = np.abs(DsDds-max_DsDds) 
-        z_source_min = z_source_range[np.argmin(minimise)]
-        # select a random source within the range
-        z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
-        if verbose:
-            print("Minimum z_source:",np.round(z_source_min,2))
-            print("Chosen z_source:", np.round(z_source,2))
-        return z_source
-
-def get_dP(radius_kpc,pixel_num,arcXkpc=None,cosmo=None,Gal=None):
-    if arcXkpc is None:
-        if cosmo is None or Gal is None:
-            raise RuntimeError("Give either arcXkpc or cosmo and Gal")
-        arcXkpc = cosmo.arcsec_per_kpc_proper(Gal.z) # ''/kpc (ie inverse of Dd conv. from rad to arcsec)
-            
-    try:
-        radius_kpc.value 
-    except AttributeError:
-        # hoping the radius is actually inserted in kpc
-        radius_kpc *= u.kpc 
-    return 2*radius_kpc*arcXkpc.to("arcsec/kpc")/(int(pixel_num.imag)*u.pix) #''/pix
-
 # index for particle types:
 # gas,dm, stars,bh : 0,1,4,5 
 class PartGal:
     """Given the simulation, snap (or z) and galaxy numbers, set up a class
     with all the needed particle properties converted in physical units
     """
-    def __init__(self, Gn, SGn,sim=std_sim,z=None,snap=None,M=None,Centre=None): #,query="",CMx,CMy,CMz,M=None):
-        self.sim    = sim
-        z,snap      = get_z_snap(z,snap)
-        self.snap   = snap
-        self.z      = z
-        self.Gn     = Gn
-        self.SGn    = SGn
+    def __init__(self, 
+                 Gn, SGn,sim=std_sim, # identity of the galaxy
+                 z=None,snap=None,    # redshift or snap
+                 gal_dir=gal_dir,     # where to store it
+                 M=None,Centre=None): # these can be recovered
+        self.sim      = sim
+        z,snap        = get_z_snap(z,snap)
+        self.snap     = snap
+        self.z        = z
+        self.Gn       = Gn
+        self.SGn      = SGn
         #Note: this is unique only within the snap
-        self.Name   = f"G{Gn}SGn{SGn}" 
+        self.Name     = f"Gn{self.Gn}SGn{self.SGn}" 
+        self.gal_dir  = Path(gal_dir)
         # Mass and Centre can be recovered
-        kw_MCntr    = get_kwMCntr(Gn,SGn,sim=sim,snap=snap,)
-        _M          = kw_MCntr["M"]
-        _Centre     = kw_MCntr["Centre"]
+        kw_MCntr      = get_kwMCntr(Gn,SGn,z=z,sim=sim)
+        _M            = kw_MCntr["M"]
+        _Centre       = kw_MCntr["Centre"]
         if M is not None:
-            assert M == _M
+            assert M  == _M
         if Centre is not None:
             assert np.all(Centre == _Centre)
-        self.M      = _M
-        self.centre = _Centre
+        self.M        = _M
+        self.centre   = _Centre
         self.a,self.h,self.boxsize = self.read_snap_header()
 
-        # Define/Create Gal path
-        self.set_gal_path() # works
-        self.islens_file = f"{self.gal_snap_dir}/{self.Name}_islens.dll"
+        # all paths are dealt as properties
+        mkdir(self.gal_snap_dir)
+        self.islens_file = self.gal_snap_dir/f"{self.Name}_islens.dll"
         
         # only for DEBUGging you should set it false
         self._read_prev = True
@@ -253,14 +186,11 @@ class PartGal:
         if not self._read_prev:
             return False
         prev_Gal = ReadGal(self)
-        if prev_Gal is False:
+        if prev_Gal is False or prev_Gal != self:
             return False
-        # we have now a good way to define equality
-        if prev_Gal == self:
-            for attr, value in prev_Gal.__dict__.items():
-                setattr(self, attr, value)
-            return True
-        return False
+        # if common attribute, they are overwritten by previous:
+        self.__dict__ = {**self.__dict__,**prev_Gal.__dict__}
+        return True
             
     
     def prop2comov(self,varType):
@@ -304,7 +234,7 @@ class PartGal:
             """Special case for the mass of dark matter particles."""   
             fl =  glob.glob(f"{self.path_snap}.0.hdf5")
             if len(fl)!=1:
-                raise RuntimeError(f"{fl} found to be not of lenght 1 from glob({self.path_snap}.0.hdf5)")
+                raise RuntimeError(f"{fl} found to be not of lenght 1 from glob({self.path_snap}.0.hdf5): len={len(fl)}")
             fl = fl[0]
             with h5py.File(fl, 'r') as f:
                 h = f['Header'].attrs.get('HubbleParam')
@@ -366,7 +296,7 @@ class PartGal:
         self.N_dm       = _count_part(self.dm)
         self.N_stars    = _count_part(self.stars)
         self.N_bh       = _count_part(self.bh)
-        self.N_tot_part =  self.N_gas+self.N_dm+self.N_stars +self.N_bh
+        self.N_tot_part =  self.N_gas+self.N_dm+self.N_stars+self.N_bh
         return self.N_tot_part
 
     def _mass_tot_part(self):
@@ -379,7 +309,7 @@ class PartGal:
         self.M_bh    = _mass_part(self.bh)
         
         self.M_tot   =  self.M_gas+self.M_dm+self.M_stars +self.M_bh
-        self.verbose_assert_almost_equal(float(self.M_tot)/float(self.M),1,decimal=3,msg_title="Mass")
+        self.verbose_assert_almost_equal(float(self.M_tot)/float(self.M),1,decimal=3,msg_title="The summed mass and the expected mass differs")
         return self.M_tot
         
     def verbose_assert_almost_equal(self,value1,value2=1,decimal=3,msg_title=None):
@@ -420,31 +350,26 @@ class PartGal:
         center_actual  = np.array(cnt_m)
         center_desired = self.centre
         #np.testing.assert_almost_equal(center_desired,center_desired,decimal=2)
-        self.verbose_assert_almost_equal(center_desired,center_desired,decimal=2,msg_title="Centre")      
-        return 0
-    
-    def get_pkl_path(self):
+        self.verbose_assert_almost_equal(center_desired,center_desired,decimal=2,msg_title="Centre") 
+        
+    @property
+    def gal_snap_dir(self):
+        """Define/locate main snap/redshift directory
+        """
+        gal_snap_dir = self.gal_dir/f"snap_{self.snap}"
+        return gal_snap_dir
+    @property
+    def pkl_path(self):
         """Define pkl path to store the class instance
         """
-        if not hasattr(self,"gal_snap_dir"):
-           self.gal_path,self.gal_snap_dir = get_gal_path(self,ret_snap_dir=True)
-        if not hasattr(self,"pkl_path"):
-            self.pkl_path = f"{self.gal_snap_dir}/Gn{self.Gn}SGn{self.SGn}.pkl"
-        return self.pkl_path
+        pkl_path = self.gal_snap_dir/f"{self.Name}.pkl"
+        return pkl_path
         
-    def set_gal_path(self):
-        self.gal_path,self.gal_snap_dir = get_gal_path(self,ret_snap_dir=True)
-        mkdir(self.gal_snap_dir)
-        self.get_pkl_path()
-        return 0
-
     def store_gal(self):
-        if not hasattr(self,"pkl_path"):
-            self.set_gal_path()
         # store this galaxy
         with open(self.pkl_path,"wb") as f:
             dill.dump(self,f)
-        print("Saved "+self.pkl_path)
+        print(f"Saved {self.pkl_path}")
 
 # this function is a wrapper for convenience - it takes the class itself as input
 def ReadGal(Gal,vebose=True):
@@ -461,22 +386,31 @@ def LoadGal(path,if_fail_recompute=True,verbose=True):
 # to simplify the input: given the sim, z, and GnSgn, 
 # we get the mass and center of the galaxy for input of PartGal 
 
-def get_kwMCntr(Gn,SGn,sim=std_sim,z=None,snap=None,gal_dir=gal_dir,pkl_name=pkl_gals):
-    pkl_path = f"{gal_dir}/{pkl_name}" 
-    myData   = load_whatever(pkl_path)
+def get_kwMCntr(Gn,SGn,sim=std_sim,
+                z=None,snap=None):
     z,snap   = get_z_snap(z,snap)
-    z = min(myData["z"], key=lambda x:abs(x-z))
-    index    = np.where((myData["Gn"]==Gn) & (myData["SGn"]==SGn) & (myData["z"]==z))[0][0]
+    # get_gals is slow-ish but safe (require internet access!)
+    myData   = get_gals(sim=sim,
+                        min_mass="0",min_z=str(z-0.05),max_z=str(z+0.05),
+                        save_pkl=False,check_prev=True,verbose=False,plot=False)
+    
+    z        = min(myData["z"], key=lambda x:abs(x-z))
+    index    = np.where((myData["Gn"]==Gn) & (myData["SGn"]==SGn) & (myData["z"]==z))[0]
+    if len(index)>1:
+        raise RuntimeError(f"Found multiple galaxies with same z, G and SGn")
+    index    = index[0] 
+    Centre   = np.array([myData["CMx"],myData["CMy"],myData["CMz"]]).T[index]
     kwMCntr  = {"M":myData["M"][index],
-               "Centre":np.array([myData["CMx"],myData["CMy"],myData["CMz"]]).T[index]}
+               "Centre":Centre}
     return kwMCntr
 
-def get_rnd_PG(sim=std_sim,min_mass = "1e12",min_z="0.2",max_z="2",
-               pkl_name="massive_gals.pkl",check_prev=True,save_pkl=True):
-    """Randomly select a galaxy from the sample 
+def get_rnd_PG(sim=std_sim,min_mass = min_mass,min_z=min_z,max_z=max_z,
+               check_prev=True,save_pkl=True):
+    """Randomly sample a galaxy from the simulation 
     """
+
     kw_gal   = get_rnd_gal_indexes(sim=sim,min_mass=min_mass,min_z=min_z,max_z=max_z,
-                                   pkl_name=pkl_name,check_prev=check_prev,save_pkl=save_pkl)
+                                   check_prev=check_prev,save_pkl=save_pkl)
     z        = kw_gal["z"] 
     M        = kw_gal["M"] 
     Gn,SGn   = kw_gal["Gn"],kw_gal["SGn"]
@@ -546,7 +480,6 @@ def get_CM(Ms,Xs,Ys,Zs=None):
 if __name__=="__main__":
     
     PG = get_rnd_PG()
-    plt.close()
     fig, ax = plt.subplots(3)
     nx = 100
     for name,part in zip(["stars","dm","gas"],[PG.stars,PG.dm,PG.gas]):
@@ -563,8 +496,8 @@ if __name__=="__main__":
     namefig = f"tmp/hist_by_hand_parts.png"
     plt.tight_layout()
     plt.savefig(namefig)
-    plt.close()
-    print("Saved "+namefig) 
+    plt.close(fig)
+    print(f"Saved {namefig}") 
     """
     print("Testing dens map")
     from test_proj_part_hist import get_dens_map_rotate_hist
