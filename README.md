@@ -1,1 +1,3 @@
-# dirty_eagle
+# EAGLE Lensing 
+
+TODO write README
