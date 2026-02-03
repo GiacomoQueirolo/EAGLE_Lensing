@@ -1,7 +1,7 @@
 """
 Study the statistic of isodensity contours of available lenses
 """
-import glob
+#import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -13,7 +13,8 @@ from isophote4isodens_AMR import fit_isodens,plot_isodens
 if __name__=="__main__":
     # this directory structure has to be rechecked
     savedir_sim=default_savedir_sim
-    lenses = glob.glob(f"{sim_lens_path}/{std_sim}/snap*/{savedir_sim}/*.pkl")
+    #lenses = glob.glob(f"{sim_lens_path}/{std_sim}/snap*/{savedir_sim}/*.pkl")
+    lenses = sim_lens_path.glob(f"{std_sim}/snap*/{savedir_sim}/*.pkl")
     gamma_distr = [] 
     f_ellipt_distr = []
     DPA_distr = []
@@ -29,7 +30,7 @@ if __name__=="__main__":
             kw_res  = fit_isodens(lens)
             #plot_isodens(lens,kw_res=kw_res)
         except Exception as e:
-            print("Lens "+lens_pth+" failed:\n",e)
+            print(f"Lens {lens_pth} failed:\n{e}")
             print("skipping")
             continue
         logr    = kw_res["loglogfit"]["fitx"]
@@ -169,6 +170,6 @@ if __name__=="__main__":
     ax.legend()
     plt.tight_layout()
     nm = "tmp/distr_isoparams.png"
-    print("Saving "+nm)
+    print(f"Saving {nm}")
     plt.savefig(nm)
     

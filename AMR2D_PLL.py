@@ -245,5 +245,5 @@ def _test_AMR():
     plot_amr_cells(cells)
     nm_test = "tmp/AMR_pll_test.pdf"
     plt.savefig(nm_test)
-    print("Saving"+nm_test)
+    print(f"Saving {nm_test}")
     

@@ -64,7 +64,7 @@ def plot_gal(gl):
     plt.legend()
     plt.title("Mass Histogram For Different Particles of 1 EAGLE Gal.")
     nm = sim_path+"/mHistGal1.png"
-    print("Saving "+nm)
+    print(f"Saving {nm}")
     plt.savefig(nm)
     plt.close()
     
@@ -113,7 +113,7 @@ def plot_gal(gl):
             axii.set_ylabel("Y [Mpc]")
                 
     nm = sim_path+"/PartDistrGal.png"
-    print("Saving "+nm)
+    print(f"Saving {nm}")
     plt.savefig(nm)
     plt.close()
     

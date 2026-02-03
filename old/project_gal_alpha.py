@@ -394,7 +394,7 @@ def theta_E_from_particles(Ms, RA, DEC, Dd, Ds, Dds,cutoff,nbins=100,verbose=Tru
     plt.title(r"$\Sigma_{encl}$")
     plt.legend()
     plt.savefig(nm_sigmaplot)
-    print("Saving "+nm_sigmaplot)
+    print(f"Saving {nm}"_sigmaplot)
     plt.close()
     return theta_E_arcsec
 

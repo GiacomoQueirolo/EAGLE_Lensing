@@ -1,11 +1,6 @@
-
-from python_tools.tools import mkdir
-from Gen_PM_PLL_AMR import plot_all
-from GPPA_realistic_sim_images import wrapper_get_rnd_lens,create_realistic_image
-from GPPA_realistic_sim_images import lnstr_kw_data,lnstr_kw_psf,masking
-
 import json,dill
 import numpy as np
+from pathlib import Path
 from copy import copy,deepcopy
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -13,22 +8,21 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from lenstronomy.Plots.model_plot import ModelPlot
 from lenstronomy.Plots import chain_plot
 
+from plot_PL import plot_all
+from GPPA_realistic_sim_images import masking
+from python_tools.tools import mkdir,to_dimless
+from Gen_PM_PLL_AMR import wrapper_get_rnd_lens
+
 
 lens_model_list = ['EPL','SHEAR_GAMMA_PSI']
+res_dir_base = Path("tmp/modelling_sim_lenses/")
 
 if __name__=="__main__":
-    _res_dir = "tmp/modelling_sim_lenses/"
     lens = wrapper_get_rnd_lens(reload=False)
-    res_dir = f"{_res_dir}/{lens.name}"
+    res_dir = f"{res_dir_base}/{lens.name}"
     mkdir(res_dir)
     plot_all(lens,skip_caustic=False)
-    
-    # update it with realistic images
-    kw_data = create_realistic_image(lens)
-    # reform it in the lenstronomy format
-    kwargs_psf  = lnstr_kw_psf(kw_data)
-    kwargs_data = lnstr_kw_data(kw_data)
-    #print("image shape",kwargs_data["image_data"].shape)
+    multi_band_list = lens.sim_multi_band_list()
     # models
     kwargs_model = {'lens_model_list': lens_model_list,
                'source_light_model_list': ["SERSIC"]}
@@ -37,9 +31,9 @@ if __name__=="__main__":
     #image = kwargs_data["image_data"]
     mask_HD = masking(lens)
     _lns  = deepcopy(lens)
-    _lns.image_sim = kwargs_data["image_data"]
+    _lns.image_sim = multi_band_list[0][0]["image_data"]
     _lns.pixel_num = _lns.image_sim.shape[0]
-    _lns.deltaPix  = kw_data["deltaPix"]
+    _lns.deltaPix  = to_dimless(_lns.radius)*2/_lns.pixel_num
     mask_LD = masking(_lns)
     #DEBUG 
     plt.close()
@@ -80,8 +74,8 @@ if __name__=="__main__":
     cax = divider.append_axes('right', size='5%', pad=0.05)
     fig.colorbar(im0, cax=cax, orientation='vertical')   
     
-    nm = "tmp/"+lens.name+"_masked_im.png"
-    print("Saving "+nm)
+    nm = res_dir/f"{lens.name}_masked_im.png"
+    print(f"Saving {nm}")
     plt.savefig(nm)
     mask = mask_LD
     #print("mask shape",mask.shape)
@@ -99,15 +93,7 @@ if __name__=="__main__":
                       "image_likelihood_mask_list": [mask]  
                              }
 
-    supersampling_factor = kw_data["point_source_supersampling_factor"]
-    kwargs_numerics = {'supersampling_factor': supersampling_factor, 
-                    'supersampling_convolution': True,
-                    "supersampling_kernel_size":supersampling_factor,# int (odd number), size (in regular pixel units) of the super-sampled convolution
-                    'point_source_supersampling_factor':supersampling_factor} 
 
-    
-    image_band = [kwargs_data, kwargs_psf, kwargs_numerics]
-    multi_band_list = [image_band]
     kwargs_data_joint = {'multi_band_list': multi_band_list, 'multi_band_type': 'multi-linear'}
 
     # Params:
@@ -151,9 +137,9 @@ if __name__=="__main__":
     # actual fit:
     from lenstronomy.Workflow.fitting_sequence import FittingSequence
     fitting_seq = FittingSequence(kwargs_data_joint, kwargs_model, kwargs_constraints, kwargs_likelihood, kwargs_params)
-    fitting_kwargs_list = [['PSO', {'sigma_scale': 1., 'n_particles': 50, 'n_iterations': 200}]
+    fitting_kwargs_list = [['PSO', {'sigma_scale': 1., 'n_particles': 50, 'n_iterations': 400}]
                       ,
-                       ['MCMC', {'n_burn': 100, 'n_run': 300, 'walkerRatio': 5, 'sigma_scale': .1}]
+                       ['MCMC', {'n_burn': 100, 'n_run': 400, 'walkerRatio': 5, 'sigma_scale': .1}]
         ]
     kw_input = {"kwargs_data_joint":   kwargs_data_joint,
                 "kwargs_model":        kwargs_model, 
@@ -162,18 +148,18 @@ if __name__=="__main__":
                 "kwargs_params":       kwargs_params,
                 "fitting_kwargs_list": fitting_kwargs_list
                }
-    nm_input = res_dir+"/kw_input.dll"
+    nm_input = f"{res_dir}/kw_input.dll"
     with open(nm_input,"wb") as f:
         dill.dump(kw_input,f)
-    print("Storing input in kw:"+nm_input)
+    print(f"Saving input in kw: {nm_input}")
     
     chain_list = fitting_seq.fit_sequence(fitting_kwargs_list)
     kwargs_result = fitting_seq.best_fit()
     print("kwargs_result",kwargs_result)
-    nm_res = res_dir+"/kw_res.json"
+    nm_res = f"{res_dir}/kw_res.json"
     with open(nm_res,"w") as f:
         json.dump(kwargs_result,f)
-    print("Storing result output in kw:"+nm_res)
+    print(f"Saving result output in kw:{nm_res}")
 
     print(kwargs_result)
     # we need to extract the updated multi_band_list object since the coordinate shifts were updated in the kwargs_data portions of it
@@ -196,7 +182,7 @@ if __name__=="__main__":
     f.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0., hspace=0.05)
     nm = f'{res_dir}/mass_model.pdf'
     plt.savefig(nm)
-    print("Saving "+nm)
+    print(f"Saving {nm}")
     
     f, axes = plt.subplots(1,2, figsize=(8, 4), sharex=False, sharey=False)
 
@@ -208,4 +194,4 @@ if __name__=="__main__":
     #plt.show()
     nm = f'{res_dir}/light_model.pdf'
     plt.savefig(nm)
-    print("Saving "+nm)
+    print(f"Saving {nm}")

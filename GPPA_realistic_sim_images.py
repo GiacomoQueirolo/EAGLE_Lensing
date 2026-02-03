@@ -3,7 +3,7 @@ from python_tools.get_res import LoadClass
 from python_tools.read_fits import load_fits, load_fitshead,get_transf_matrix
 from python_tools.conversion import get_pixscale
 from python_tools.tools import to_dimless
-from Gen_PM_PLL_AMR import LensPart,plot_all,LoadLens
+from Gen_PM_PLL_AMR import LensPart,LoadLens
 from Gen_PM_PLL_AMR import kwlens_part_AS,z_source_max,pixel_num
 from project_gal_AMR import ProjectionError
 from pyinstrument import Profiler
@@ -101,7 +101,7 @@ def create_realistic_image(lens,
                 i+=1
     
         nm = "tmp/image"+lens.name+".pdf"
-        print("saving "+nm)
+        print(f"Saving {nm}")
         plt.tight_layout()
         plt.savefig(nm)
         plt.close("all")

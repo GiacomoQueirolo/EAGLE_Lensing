@@ -4,6 +4,7 @@
 import dill
 import numpy as np
 from copy import copy
+from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.colors import  Normalize
@@ -22,9 +23,9 @@ from ParticleGalaxy import Gal2kwMXYZ,get_CM
 dir_name     = "proj_part_hist"
 def prep_Gal_projpath(Gal,dir_name=dir_name):
     # impractical but easy to set up
-    Gal.proj_dir = Gal.gal_snap_dir+f"/{dir_name}_{Gal.Name}/"
+    Gal.proj_dir = Gal.gal_snap_dir/f"{dir_name}_{Gal.Name}/"
     mkdir(Gal.proj_dir)
-    Gal.projection_path = f"{Gal.proj_dir}/projection.pkl"
+    Gal.projection_path = Gal.proj_dir/"projection.pkl"
     return Gal
 
 
@@ -86,7 +87,7 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
     try:
         assert reload
         kw_res = load_whatever(Gal.projection_path)
-        print("Found and loaded projection from :"+Gal.projection_path)
+        print(f"Found and loaded projection from : {Gal.projection_path}")
         return kw_res
     except AssertionError:
         pass
@@ -111,7 +112,7 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
                                       kw_parts_proj=kw_parts_proj,
                                       verbose=verbose)
 
-            savenameSigmaEnc =Gal.proj_dir+"/Sigma_enc_proj"+str(proj_index)+".png"
+            savenameSigmaEnc =Gal.proj_dir/f"Sigma_enc_proj{proj_index}.png"
             kw_z_min = get_min_z_source(Gal=Gal,min_thetaE_kpc=min_thetaE_kpc,
                                       kw_2Ddens=kw_2Ddens,
                                       z_source_max=z_source_max,
@@ -145,7 +146,7 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
         if save_res:
             with open(Gal.projection_path,"wb") as f:
                 dill.dump(kw_res,f)
-            print("Saved "+Gal.projection_path)
+            print(f"Saved {Gal.projection_path}")
         return kw_res
 
 #from AMR2D import AMR_density
@@ -175,7 +176,7 @@ def dens_map_AMR(Gal,
     """
     print("DEBUG")
     tmp_amr_name = "tmp/del_amr_cells.pkl"
-    print("Saving ",tmp_amr_name)
+    print(f"Saving {tmp_amr_name})
     with open(tmp_amr_name,"wb") as f:
         dill.dump(AMR_cells,f)
     """
@@ -216,7 +217,7 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     #fig.savefig(savenameSigmaEnc)
     #plt.close(fig)
     #fig.savefig("tmp/Sigma_enc.png")
-    #print("Saving "+savenameSigmaEnc)
+    #print(f"Saving {savenameSigmaEnc}")
 
     # define the z_source_min:        
     z_source_min = _get_min_z_source(cosmo=Gal.cosmo,z_lens=Gal.z,
@@ -268,7 +269,7 @@ def _get_min_z_source(cosmo,z_lens,thresh_dens,z_source_max,verbose=True):
             fig_dsdds.savefig(name)
             plt.close(fig_dsdds)
             print("threshold density",short_SciNot(thresh_dens.value))
-            print("Saved "+name)
+            print(f"Saved {name}")
         return 0
     else:
         # Note: successful test means that the threshold density = Sigmacrit given z_source =z_source_min
@@ -291,8 +292,7 @@ def get_MDfromAMRcells_PLL(AMR_cells):
         pass
     MD_value  = np.max(density)
     return MD_coords,MD_value
-
-def get_rough_thetaE_PLL(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR.png",path="tmp/",fig_Sig=None):
+def get_rough_thetaE_PLL(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR.png",path=Path("tmp/"),fig_Sig=None):
     # -> this should only be used for plotting
     # the idea is simple:
     # we want a very approximate idea of the theta_E of the galaxy
@@ -350,7 +350,7 @@ def cells2SigRad(kw_2Ddens):
     Sigma_encl = cumulative_mass/cumulative_area
     return r_sorted,Sigma_encl
     
-def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigmaplot="Sigma.png",path="tmp/"):
+def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigmaplot="Sigma.png",path=Path("tmp/")):
     # Critical density
     Sigma_crit = (const.c**2 / (4*np.pi*const.G) * (Ds/(Dd*Dds))).to("Msun/kpc^2")
     # Physical scale of 1 arcsec at Dd
@@ -373,8 +373,8 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigma
     fig.axes[0].axhline(Sigma_crit.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ ["+str(Sigma_crit.unit)+"]")
     fig.axes[0].axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="-",c="b")
     fig.axes[0].legend()
-    nm_savefig = path+"/"+nm_sigmaplot
-    print("Saving "+nm_savefig)
+    nm_savefig = path/nm_sigmaplot
+    print(f"Saving {nm_savefig}")
     fig.savefig(nm_savefig)
     fig.savefig("tmp/Sig_enc.png")
     plt.close(fig)

@@ -1,6 +1,6 @@
 # dirty little script to produce many GL 
 import numpy as np
-from GPPA_realistic_sim_images import wrapper_get_rnd_lens
+from Gen_PM_PLL_AMR import wrapper_get_rnd_lens
 
 aim_n_lenses = 200
 n_lenses = 0

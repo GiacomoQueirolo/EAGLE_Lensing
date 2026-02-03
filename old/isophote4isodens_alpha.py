@@ -122,7 +122,7 @@ def plot_isodens(Lens,savedir=None,cutoff_rad=None,pixel_num=None,verbose=True):
     y_plot = ymin + (y / Ny) * (ymax - ymin)
     ax3.plot(x_plot, y_plot, color='black')
     name_plot = savedir+"/isodens_model.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()
@@ -155,7 +155,7 @@ def plot_isodens(Lens,savedir=None,cutoff_rad=None,pixel_num=None,verbose=True):
     
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35, wspace=0.35)
     name_plot = savedir+"/isodens_prms1.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()
@@ -192,7 +192,7 @@ def plot_isodens(Lens,savedir=None,cutoff_rad=None,pixel_num=None,verbose=True):
     
     
     name_plot = savedir+"/isodens_prms2.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()
@@ -205,7 +205,7 @@ def plot_isodens(Lens,savedir=None,cutoff_rad=None,pixel_num=None,verbose=True):
     plt.xlabel(r'Semimajor axis [kpc])')
     plt.ylabel(r'$\kappa$')
     name_plot = savedir+"/isodens_kappa.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()
@@ -223,7 +223,7 @@ def plot_isodens(Lens,savedir=None,cutoff_rad=None,pixel_num=None,verbose=True):
     plt.xlabel(r'log$_{10}$(Semimajor axis [kpc])')
     plt.ylabel(r'log$_{10}$($\kappa$)')
     name_plot = savedir+"/isodens_loglogk.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()

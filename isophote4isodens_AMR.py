@@ -3,6 +3,7 @@
 # -> add isopotential fit
 import dill
 import numpy as np
+from pathlib import Path
 import astropy.units as u
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
@@ -114,9 +115,9 @@ def fit_iso(Lens,cutoff_rad=None,pixel_num=None,verbose=True,map_type="kappa",
     kw_loglogfit      = {"popt_log":popt_log,"pcov_log":pcov_log,"fity":ydatafit,"fitx":np.log10(sma_kpc[1:])}
     kw_res            = {"isofit":kw_iso,"loglogfit":kw_loglogfit,"cutoff_rad":cutoff_rad}
     if save:
-        print("Saving isofit: "+res_path)
         with open(res_path,"wb") as f:
             dill.dump(kw_res,f)
+        print(f"Saving isofit: {res_path}")
     return kw_res
 
 def fit_isodens(Lens,cutoff_rad=None,pixel_num=None,verbose=True,save=True,reload=True):
@@ -211,7 +212,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     y_plot = ymin + (y / Ny) * (ymax - ymin)
     ax3.plot(x_plot, y_plot, color='black')
     name_plot = f"{savedir}/{map_type}_model.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()
@@ -245,7 +246,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35, wspace=0.35)
     name_plot = f"{savedir}/{map_type}_prms1.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()
@@ -281,7 +282,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35, wspace=0.35)
     
     name_plot = f"{savedir}/{map_type}_prms2.pdf"
-    print("Saving "+name_plot)
+    print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
     plt.close()
@@ -308,7 +309,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         ax.set_xlabel(r'log$_{10}$(Semimajor axis [kpc])')
         ax.set_ylabel(r'log$_{10}$('+map_nm+r'$)')
         name_plot = f"{savedir}/{map_type}_map.pdf"
-        print("Saving "+name_plot)
+        print(f"Saving {name_plot}")
         plt.tight_layout()
         plt.savefig(name_plot)
         plt.close()
@@ -325,7 +326,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         plt.ylabel(r"$\gamma$(r)")
         plt.legend()
         namefig = f"{savedir}/gamma_r.pdf"
-        print("Saving "+namefig)
+        print(f"Saving {namefig}")
         plt.savefig(namefig)
         plt.close()
     return kw_res
@@ -356,7 +357,7 @@ def get_iso_cutoff(Lens,scale_cutoff=3):
 if __name__=="__main__":
     # for now applied to a "known" lens galaxy
     Lens = LoadLens("sim_lens/RefL0025N0752/snap19_G6.0/test_sim_lens_AMR/G6SGn0_Npix200_PartAS.pkl")
-    savedir = "tmp/"
+    savedir = Path("tmp/")
     scale_cutoff = 3
     cutoff_rad = get_iso_cutoff(Lens,scale_cutoff)
     kw_res = plot_isodens(Lens,savedir,cutoff_rad=cutoff_rad,reload=False)

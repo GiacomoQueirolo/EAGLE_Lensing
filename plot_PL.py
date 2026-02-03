@@ -37,7 +37,7 @@ def _plot_caustics(LPClass,
     ax.legend()
     ax.set_title("Caustics and Critical Curves") 
     plt.tight_layout()
-    print("Saving "+savename) 
+    print(f"Saving {savename}") 
     plt.savefig(savename)
     plt.close()
     
@@ -73,7 +73,7 @@ def plot_kappamap(kappa1,extent_kpc,title1="",savename="kappa.png",skip_show=Fal
     ax.legend()
     ax.set_title(title1 +" projection at x=0")
     plt.suptitle("Density distribution")
-    print("Saving "+savename)
+    print(f"Saving {savename}")
     plt.savefig(savename)
     if not skip_show:
         plt.show()
@@ -110,14 +110,14 @@ def plot_lensed_im_and_kappa(Model,savename="lensed_im.pdf",kw_extents=None):
     fg.colorbar(im0, cax=cax, orientation='vertical',label=r"log$_{10}$ flux [arbitrary]")
     plt.suptitle(r"With z$_{\text{lens}}$="+str(np.round(Model.z_lens,2))+" z$_{\text{source}}$="+str(np.round(Model.z_source,2)))
     plt.tight_layout()
-    print("Saving "+savename) 
+    print(f"Saving {savename}") 
     plt.savefig(savename)
     plt.close("all")
     
 def plot_all(Model,savename_lensed="lensed_im.pdf",savename_kappa="kappa.png",savename_caustics="caustics.png",fast_caustic=True,skip_caustic=False):
     kw_extents = get_extents(Model.arcXkpc,Model)
-    plot_lensed_im_and_kappa(Model,savename=Model.savedir+"/"+savename_lensed,kw_extents=kw_extents)
+    plot_lensed_im_and_kappa(Model,savename=Model.savedir/savename_lensed,kw_extents=kw_extents)
     if not skip_caustic:
-        plot_caustics(Model,fast_caustic=fast_caustic,savename=Model.savedir+"/"+savename_caustics,kw_extents=kw_extents)
+        plot_caustics(Model,fast_caustic=fast_caustic,savename=Model.savedir/savename_caustics,kw_extents=kw_extents)
     plt.close("all")
     return 0
