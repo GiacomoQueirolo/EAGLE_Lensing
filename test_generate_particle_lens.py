@@ -1,4 +1,4 @@
-# to run to test Gen_PM_PLL_AMR
+# to run to test generate_particle_lens
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -10,7 +10,7 @@ from lenstronomy.SimulationAPI.ObservationConfig.JWST import JWST
 
 from plot_PL import plot_all
 from python_tools.tools import to_dimless
-from Gen_PM_PLL_AMR import wrapper_get_rnd_lens,get_extents,LoadLens,LensPart
+from generate_particle_lens import wrapper_get_rnd_lens,get_extents,LoadLens,LensPart
 
 if __name__ == "__main__":
 

@@ -17,7 +17,7 @@ from python_tools.tools import mkdir,to_dimless,ensure_unit,short_SciNot
 from python_tools.get_res import load_whatever
 
 from lib_cosmo import SigCrit
-from ParticleGalaxy import Gal2kwMXYZ,get_CM
+from particle_galaxy import Gal2kwMXYZ,get_CM
 
 # for now keep this and check if still needed
 dir_name     = "proj_part_hist"
@@ -188,9 +188,10 @@ def dens_map_AMR(Gal,
     return kw_2Ddens
 
 def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,savenameSigmaEnc = "tmp/Sigma_enc.png"):
-    # given a projection, return the minimal z_source
-    # fails if it can't produce a supercritical lens w. z_source<z_source_max
-        
+    """Given a projection, return the minimal z_source
+    fails if it can't produce a supercritical lens w. z_source<z_source_max and 
+    Sigma(theta_min)>Sigma_crit
+    """   
     dens_at_thetamin = getDensAtRad(kw_2Ddens,min_thetaE_kpc)
     # add plot Sigma_encl vs theta
     Sigma_crit_min   = SigCrit(z_lens=Gal.z,z_source=z_source_max,cosmo=Gal.cosmo)
@@ -263,7 +264,8 @@ def _get_min_z_source(cosmo,z_lens,thresh_dens,z_source_max,verbose=True):
             fig_dsdds,ax = plt.subplots()
             ax.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
             ax.set_xlabel(r"z$_{\text{source}}$")
-            ax.axhline(thresh_DsDds,ls="--",c="r",label=r"threshold(dens)*4$\pi$*G*$D_l$/c$^2$="+str( short_SciNot(thresh_DsDds)))
+            ax.axhline(thresh_DsDds,ls="--",c="r",label=r"thr(dens)*4$\pi$*G*$D_{\text{l}}$/c$^2$="+str( short_SciNot(thresh_DsDds)))
+            ax.set_title("Comparison between Distance ratio and threshold density")
             ax.legend()
             name = "tmp/DsDds.pdf"
             fig_dsdds.savefig(name)

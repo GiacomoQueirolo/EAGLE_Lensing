@@ -23,7 +23,7 @@ from python_tools.tools import mkdir,to_dimless,ensure_unit
 # cosmol. params.
 from lib_cosmo import SigCrit
 # Get particle from galaxy catalogue
-from ParticleGalaxy import get_rnd_PG,Gal2kwMXYZ,LoadGal
+from particle_galaxy import get_rnd_PG,Gal2kwMXYZ,LoadGal
 # particle lens class and params.
 from particle_lenses import PMLens 
 from particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
@@ -635,7 +635,6 @@ class LensPart():
         SimObs                         = self.get_SimObs(band,kwargs_psf=kwargs_psf,
                                                          kwargs_source_model=kwargs_source_model)
         image_SimObsnoisy,error_SimObs = self.sim_image(SimObs,noisy=True)
-        raise NotImplementedError("Still to work on this - shoudl return the inputs required for modelling lens w. lenstronomy")
         kw_data_sim = SimObs.kwargs_data
         kw_data_sim["image_data"] = image_SimObsnoisy
         kw_data_sim["noise_map"] = error_SimObs
@@ -963,5 +962,5 @@ def wrapper_get_rnd_lens(reload=True):
 
 
 if __name__ == "__main__":
-    print("Do not run this script, but test/test_Gen_PM_PLL_AMR.py")
+    print("Do not run this script, but test/test_generate_particle_lens.py")
     exit()

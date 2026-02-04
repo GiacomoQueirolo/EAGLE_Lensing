@@ -1,10 +1,10 @@
-# copied and adapted from test_Gen_PM_PLL_AMR.py
+# copied and adapted from test_generate_particle_lens.py
 from python_tools.get_res import LoadClass
 from python_tools.read_fits import load_fits, load_fitshead,get_transf_matrix
 from python_tools.conversion import get_pixscale
 from python_tools.tools import to_dimless
-from Gen_PM_PLL_AMR import LensPart,LoadLens
-from Gen_PM_PLL_AMR import kwlens_part_AS,z_source_max,pixel_num
+from generate_particle_lens import LensPart,LoadLens
+from generate_particle_lens import kwlens_part_AS,z_source_max,pixel_num
 from project_gal_AMR import ProjectionError
 from pyinstrument import Profiler
 
@@ -15,7 +15,7 @@ from lenstronomy.ImSim.Numerics.convolution import PixelKernelConvolution
 import lenstronomy.Util.image_util as image_util
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from Gen_PM_PLL_AMR import  wrapper_get_rnd_lens
+from generate_particle_lens import  wrapper_get_rnd_lens
 
 def create_realistic_image(lens,
                            exp_time=1500,  #sec. (~<exp_time> for J1433 opt. HST obs )
@@ -70,7 +70,7 @@ def create_realistic_image(lens,
     bkg_noise = image_util.add_background(sim_img_conv, sigma_bkd=lens.bckg_rms)
     noise_map = np.hypot(poisson,bkg_noise)
     if do_plot:
-        from Gen_PM_PLL_AMR import get_extents
+        from generate_particle_lens import get_extents
         kw_extents = get_extents(lens.arcXkpc,lens)
         extent_arcsec = kw_extents["extent_arcsec"]
         kw_plot = {"cmap":"gist_heat","origin":"lower","extent":extent_arcsec}

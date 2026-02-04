@@ -1,4 +1,4 @@
 # monkey-patch
 
-print("DeprecationWarning: We should now use ParticleGalaxy")
-from ParticleGalaxy import PartGal as NewGal
+print("DeprecationWarning: We should now use particle_galaxy")
+from particle_galaxy import PartGal as NewGal

@@ -5,13 +5,14 @@ from copy import copy,deepcopy
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from lenstronomy.Plots.model_plot import ModelPlot
 from lenstronomy.Plots import chain_plot
+from lenstronomy.Plots.model_plot import ModelPlot
+from lenstronomy.SimulationAPI.ObservationConfig.HST import HST
 
 from plot_PL import plot_all
 from GPPA_realistic_sim_images import masking
 from python_tools.tools import mkdir,to_dimless
-from Gen_PM_PLL_AMR import wrapper_get_rnd_lens
+from generate_particle_lens import wrapper_get_rnd_lens
 
 
 lens_model_list = ['EPL','SHEAR_GAMMA_PSI']
@@ -22,7 +23,10 @@ if __name__=="__main__":
     res_dir = f"{res_dir_base}/{lens.name}"
     mkdir(res_dir)
     plot_all(lens,skip_caustic=False)
-    multi_band_list = lens.sim_multi_band_list()
+
+    band_HST = HST(band='WFC3_F160W', psf_type="GAUSSIAN")
+
+    multi_band_list = lens.sim_multi_band_list(band=band_HST)
     # models
     kwargs_model = {'lens_model_list': lens_model_list,
                'source_light_model_list': ["SERSIC"]}

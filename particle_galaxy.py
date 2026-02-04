@@ -386,22 +386,53 @@ def LoadGal(path,if_fail_recompute=True,verbose=True):
 # to simplify the input: given the sim, z, and GnSgn, 
 # we get the mass and center of the galaxy for input of PartGal 
 
+from get_gal_indexes import get_catpath
+
+def get_myCat(Gn,SGn,z,sim,min_mass="1e10",dz=0.05):
+    min_z=str(z-0.05)
+    max_z=str(z+0.05)
+
+    # try first finding the exact one
+    cat_path = get_catpath(min_mass=min_mass,\
+                           min_z=min_z,max_z=max_z)
+    if os.path.isfile(cat_path):
+        myCat = load_whatever(cat_path)
+    else:
+        # try all the other
+        found = False
+        for pkl in Path(gal_dir).glob("*.pkl"):
+            cat = load_whatever(pkl)
+            if np.any(np.abs(cat["z"]-z)<dz):
+                zz      = min(cat["z"], key=lambda x:abs(x-z))
+                indexx  = np.where((cat["Gn"]==Gn) & (cat["SGn"]==SGn) & (cat["z"]==zz))[0]
+                if len(indexx)==1:
+                    found  = True
+                    myCat = cat
+                    index  = indexx
+                    break
+    if not found:
+        # get_gals is slow-ish but safe (require internet access!)
+        # safe-ish since we now hard write the min_mass - but should be fine
+        # TODO: find a safer approach
+
+        myCat   = get_gals(sim=sim,
+                            min_mass=min_mass,min_z=min_z,max_z=max_z,
+                            save_pkl=False,check_prev=True,verbose=False,plot=False)
+    
+        z        = min(myCat["z"], key=lambda x:abs(x-z))
+        index    = np.where((myCat["Gn"]==Gn) & (myCat["SGn"]==SGn) & (myCat["z"]==z))[0]
+        if len(index)>1:
+            raise RuntimeError(f"Found multiple galaxies with same z, G and SGn")
+        index    = index[0] 
+    return myCat,index
+    
 def get_kwMCntr(Gn,SGn,sim=std_sim,
                 z=None,snap=None):
-    z,snap   = get_z_snap(z,snap)
-    # get_gals is slow-ish but safe (require internet access!)
-    myData   = get_gals(sim=sim,
-                        min_mass="0",min_z=str(z-0.05),max_z=str(z+0.05),
-                        save_pkl=False,check_prev=True,verbose=False,plot=False)
-    
-    z        = min(myData["z"], key=lambda x:abs(x-z))
-    index    = np.where((myData["Gn"]==Gn) & (myData["SGn"]==SGn) & (myData["z"]==z))[0]
-    if len(index)>1:
-        raise RuntimeError(f"Found multiple galaxies with same z, G and SGn")
-    index    = index[0] 
-    Centre   = np.array([myData["CMx"],myData["CMy"],myData["CMz"]]).T[index]
-    kwMCntr  = {"M":myData["M"][index],
-               "Centre":Centre}
+    z,snap       = get_z_snap(z,snap)
+    myCat,index  = get_myCat(Gn,SGn,z,sim)
+    Centre       = np.array([myCat["CMx"],myCat["CMy"],myCat["CMz"]]).T[index]
+    kwMCntr      = {"M":myCat["M"][index],
+                    "Centre":Centre}
     return kwMCntr
 
 def get_rnd_PG(sim=std_sim,min_mass = min_mass,min_z=min_z,max_z=max_z,

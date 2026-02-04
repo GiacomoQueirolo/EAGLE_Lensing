@@ -1,7 +1,7 @@
 from pyinstrument import Profiler
 
 from python_tools.get_res import LoadClass
-from ParticleGalaxy import get_rnd_PG
+from particle_galaxy import get_rnd_PG
 from Gen_PM_PLL import LensPart,kwlens_part_AS,cutoff_radius,z_source_max,pixel_num
 
 print("test Gen_PM_PLL.LensPart with a random galaxy")

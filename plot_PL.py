@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from python_tools.fwhm import get_fwhm
-from Gen_PM_PLL_AMR import get_extents
+from generate_particle_lens import get_extents
 
 def _plot_caustics(LPClass,
                    kwargs_lens,
@@ -42,7 +42,7 @@ def _plot_caustics(LPClass,
     plt.close()
     
 def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",kw_extents=None):
-    return _plot_caustics(Model,Model.kwargs_lens_PART,
+    return _plot_caustics(Model,Model.kwargs_lens,
                           fast_caustic=fast_caustic,savename=savename,kw_extents=kw_extents)
 
 

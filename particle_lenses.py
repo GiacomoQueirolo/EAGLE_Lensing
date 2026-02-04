@@ -98,7 +98,7 @@ def get_kwrg_PM(samples,Ms,
     thetaEs    = thetaE_PM(M=Ms,theta_pref = theta_pref)
 
     kwargs_lens_PM,lens_model_PM = get_lens_model_PM(thetaEs,samples)
-    return {"kwargs_lens_PART":kwargs_lens_PM,"lens_model_PART":lens_model_PM}
+    return {"kwargs_lens":kwargs_lens_PM,"lens_model_PART":lens_model_PM}
                 
 def get_kwrg_AS(samples,Ms,theta_cAS
                     z_lens,z_source,
@@ -109,7 +109,7 @@ def get_kwrg_AS(samples,Ms,theta_cAS
  
     kwargs_lens_AS,lens_model_AS = get_lens_model_AS(theta_cAS,thetaEs,samples)
 
-    return {"kwargs_lens_PART":kwargs_lens_AS,"lens_model_PART":lens_model_AS}
+    return {"kwargs_lens":kwargs_lens_AS,"lens_model_PART":lens_model_AS}
 """
 #
 # naming functions
