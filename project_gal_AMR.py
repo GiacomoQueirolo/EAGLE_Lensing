@@ -107,9 +107,9 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
             kw_proj = {"proj_index":proj_index}
             # Project the particles 
             kw_parts_proj = project_kw_parts(kw_parts=kw_parts,proj_index=proj_index)
-            
-            kw_2Ddens = dens_map_AMR(Gal=Gal,
-                                      kw_parts_proj=kw_parts_proj,
+
+            # compute 2D density AMR density map
+            kw_2Ddens = dens_map_AMR(kw_parts_proj=kw_parts_proj,
                                       verbose=verbose)
 
             savenameSigmaEnc =Gal.proj_dir/f"Sigma_enc_proj{proj_index}.png"
@@ -151,8 +151,7 @@ def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
 
 #from AMR2D import AMR_density
 from AMR2D_PLL import AMR_density_PLL
-def dens_map_AMR(Gal,
-                  kw_parts_proj,
+def dens_map_AMR(kw_parts_proj,
                   max_particles=100,
                   min_area=0.1*u.kpc*u.kpc,
                   dens_thresh = 0.*u.Msun/(u.kpc**2),
@@ -362,7 +361,9 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigma
     # theta
     theta = r_sorted*arcXkpc
 
-    thetaE = np.interp(Sigma_crit.value, Sigma_encl.value[::-1], theta[::-1].value)*theta.unit
+    Sigma_crit_arcsec2 = Sigma_crit/(arcXkpc**2)
+
+    thetaE = np.interp(Sigma_crit_arcsec2.value, Sigma_encl.value[::-1], theta[::-1].value)*theta.unit
     print("theta_E_arcsec found",short_SciNot(np.round(thetaE,2)))
     if fig_Sig is None:
         fig,ax = plt.subplots(1)
@@ -372,7 +373,8 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigma
         ax.plot(theta,Sigma_encl,c="k")
     else:
         fig = fig_Sig
-    fig.axes[0].axhline(Sigma_crit.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ ["+str(Sigma_crit.unit)+"]")
+    fig.axes[0].axhline(Sigma_crit_arcsec2.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ "
+                        + +" ["+str(Sigma_crit_arcsec2.unit)+"]")
     fig.axes[0].axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="-",c="b")
     fig.axes[0].legend()
     nm_savefig = path/nm_sigmaplot

@@ -192,7 +192,8 @@ def AMR_density_PLL(x, y, m, max_particles=300, min_area=None,dens_thresh=None,S
     cells = [c[:4] + c[5:] for c in cells]
     # cells: x0,x1,y0,y1,m,density
     return cells
-
+"""
+# check project_gal_AMR
 def plot_amr_cells(cells):
     fig, ax = plt.subplots(figsize=(8,8))
     a,b= [],[]
@@ -220,7 +221,7 @@ def plot_amr_cells(cells):
     cbar = fig.colorbar(sm, ax=ax)
     cbar.set_label("Density")
     return fig,ax
-
+"""
 from time  import time
 def _test_AMR():
     N = int(1e6)
