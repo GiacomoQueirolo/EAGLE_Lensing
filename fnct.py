@@ -28,15 +28,23 @@ part_data_path = Path("/pbs/home/g/gqueirolo/EAGLE/data/")
 std_sim  = "RefL0025N0752"
 # use the following simulation only as test case
 test_sim = "RefL0012N0188"
-sim_path = part_data_path/std_sim
-# Where to store the galaxies
-gal_dir = sim_path/"Gals"
-mkdir(gal_dir)
+# used for tutorial -linked ONLY snap 20 of test_sim
+tutorial_sim = "RefTuto"
 
 def galdir2sim(gal_dir):
     sim_path = gal_dir.parent
     sim      = str(sim_path.name)
     return sim
+
+def sim2galdir(sim,part_data_path=part_data_path):
+    sim_path = Path(part_data_path)/sim
+    gal_dir  = sim_path/"Gals"
+    mkdir(gal_dir)
+    return gal_dir
+
+# Where to store the galaxies
+std_gal_dir = sim2galdir(std_sim,part_data_path=part_data_path) 
+
 # from https://dataweb.cosma.dur.ac.uk:8443/eagle-snapshots/
 # valid fo all sims apart the variable IMF runs
 kw_snap_z = {"28":0, "27":0.1, "26":0.18, "25":0.27, "24":0.37, "23":0.5, "22":0.62, "21":0.74, "20":0.87, "19":1, "18":1.26, "17":1.49, "16":1.74, "15":2.01, "14":2.24, "13":2.48, "12":3.02, "11":3.53, "10":3.98, "9":4.49, "8":5.04, "7":5.49, "6":5.97, "5":7.05, "4":8.07, "3":8.99, "2":9.99, "1":15.13, "0":20}
@@ -74,6 +82,7 @@ def get_z_snap(z=None,snap=None):
         z = get_z(snap)
     else:
         snap = get_snap(z)
+    snap = str(snap)
     return z,snap
     
 def prepend_str(str_i,ln_str,fill="0"):

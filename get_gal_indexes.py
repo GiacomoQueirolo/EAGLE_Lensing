@@ -11,15 +11,21 @@ from glob import glob
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-from fnct import std_sim,gal_dir
+from fnct import std_sim,std_gal_dir
 from sql_connect import exec_query
 from python_tools.tools import short_SciNot
 from python_tools.get_res import load_whatever
 
-def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,plot=True,check_prev=True,verbose=True):
+def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,plot=True,check_prev=True,verbose=True,
+            gal_dir=std_gal_dir):
 
+    min_mass = short_SciNot(min_mass)
+    min_z    = str(min_z)
+    max_z    = str(max_z)
+    
     cat_path = get_catpath(min_mass=min_mass,\
-                        min_z=min_z,max_z=max_z)
+                           min_z=min_z,max_z=max_z,\
+                           gal_dir=gal_dir)
     
     # select higher masses bc 1) lenses 2) else we have too many points
     myQuery = get_query(sim=sim,min_mass=min_mass,\
@@ -64,6 +70,9 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,plo
     return myData
 
 def get_query(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2"):
+    min_mass = short_SciNot(min_mass)
+    min_z    = str(min_z)
+    max_z    = str(max_z)
     myQuery = "SELECT \
         gal.GroupNumber as Gn, \
         gal.SubGroupNumber as SGn, \
@@ -81,7 +90,11 @@ def get_query(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2"):
         gal.Redshift"%(sim,min_z,max_z,min_mass)
     return myQuery
 
-def get_catpath(gal_dir=gal_dir,min_mass = "1e12",min_z="0",max_z="2"):
+def get_catpath(gal_dir=std_gal_dir,min_mass = "1e12",min_z="0",max_z="2"):
+    min_mass = short_SciNot(min_mass)
+    min_z    = str(min_z)
+    max_z    = str(max_z)
+    
     gal_dir = Path(gal_dir)
     cat_name_base = "CatGal" #old massive_gals.pkl
     cat_name = f"{cat_name_base}_minM{short_SciNot(min_mass)}_minZ{short_SciNot(min_z)}_maxZ{short_SciNot(max_z)}.pkl"

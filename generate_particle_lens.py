@@ -42,10 +42,10 @@ min_thetaE = .3*u.arcsec #arcsec
 # Path definitions:
 
 # define where to store the obtained lenses classes
-sim_lens_path       = Path("/pbs/home/g/gqueirolo/EAGLE/sim_lens/")
+std_sim_lens_path   = Path("/pbs/home/g/gqueirolo/EAGLE/sim_lens/")
 default_savedir_sim = "test_sim_lens_AMR" # subdirectory depending on the lensing algorithm
 
-def get_lens_dir(Gal):
+def get_lens_dir(Gal,sim_lens_path=std_sim_lens_path):
     #lens_dir = f"{sim_lens_path}/{Gal.sim}/snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}/"
     lens_dir = sim_lens_path/Gal.sim/f"snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}"
     mkdir(lens_dir)
@@ -113,6 +113,7 @@ class LensPart():
                  source_model_list=source_model_list, # this might not be the most efficient way to do it..
                  kwargs_band_sim=kwargs_band_sim,
                  savedir_sim="lensing",
+                 sim_lens_path=std_sim_lens_path,
                  reload=True # reload previous lens
                  ):
         Galaxy             = prep_Gal_projpath(Galaxy) # just set up some directories
@@ -126,7 +127,7 @@ class LensPart():
                 print(load_whatever(self.Gal.islens_file)["message"])
                 raise RuntimeError("Previously defined as not a lens")
         
-        lens_dir           = get_lens_dir(self.Gal)
+        lens_dir           = get_lens_dir(self.Gal,sim_lens_path=sim_lens_path)
         self.savedir_sim   = savedir_sim
         #self.savedir       = f"{lens_dir}/{savedir_sim}"
         self.savedir       = lens_dir/savedir_sim
@@ -903,7 +904,7 @@ def ReadLens(aClass,verbose=True):
 
 
 # monkey-patch for compatibility reason with previous versions:
-Lens_PART = LensPart
+#Lens_PART = LensPart
 
 def get_extents(arcXkpc,Model=None,_radec=None):
     """Returns the extent of the image in various units

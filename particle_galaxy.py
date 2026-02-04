@@ -22,7 +22,8 @@ from python_tools.get_res import load_whatever
 from astropy.cosmology import FlatLambdaCDM
 from get_gal_indexes import get_gals
 
-from fnct import gal_dir,galdir2sim,_count_part,_mass_part
+from get_gal_indexes import get_catpath
+from fnct import std_gal_dir,sim2galdir,galdir2sim,_count_part,_mass_part
 from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header
 
 # combination btw get_rnd_gal and _get_rnd_gal
@@ -53,7 +54,7 @@ def get_rnd_gal_indexes(sim=std_sim,min_mass = str(min_mass),min_z=str(min_z),
     return kw
 
 # from path to kw of Gal
-def gal_path2kwGal(gal_pkl_path):
+def gal_path2kwGal(gal_pkl_path,gal_dir=std_gal_dir):
     """From path extract the required inputs for PartGal class
     """
     gal_pkl_path = Path(gal_pkl_path)
@@ -80,7 +81,7 @@ class PartGal:
     def __init__(self, 
                  Gn, SGn,sim=std_sim, # identity of the galaxy
                  z=None,snap=None,    # redshift or snap
-                 gal_dir=gal_dir,     # where to store it
+                 gal_dir=std_gal_dir,     # where to store it
                  M=None,Centre=None): # these can be recovered
         self.sim      = sim
         z,snap        = get_z_snap(z,snap)
@@ -375,20 +376,20 @@ class PartGal:
 def ReadGal(Gal,vebose=True):
     return LoadClass(path=Gal.pkl_path,verbose=verbose)
 
-def LoadGal(path,if_fail_recompute=True,verbose=True):
+def LoadGal(path,if_fail_recompute=True,sim=std_sim,verbose=True):
     # Try loading galaxy - if fail and fail_recompute==True, try recomputing it
     Gal = LoadClass(path=path,verbose=verbose)
     if not Gal and if_fail_recompute:
-        kwGal = gal_path2kwGal(path)
-        Gal = PartGal(**kwGal)
+        gal_dir = sim2galdir(sim)
+        kwGal   = gal_path2kwGal(path,gal_dir=gal_dir)
+        Gal     = PartGal(**kwGal)
     return Gal
     
 # to simplify the input: given the sim, z, and GnSgn, 
 # we get the mass and center of the galaxy for input of PartGal 
 
-from get_gal_indexes import get_catpath
 
-def get_myCat(Gn,SGn,z,sim,min_mass="1e10",dz=0.05):
+def get_myCat(Gn,SGn,z,sim,min_mass="1e10",dz=0.05,gal_dir=std_gal_dir):
     min_z=str(z-0.05)
     max_z=str(z+0.05)
 
@@ -408,7 +409,7 @@ def get_myCat(Gn,SGn,z,sim,min_mass="1e10",dz=0.05):
                 if len(indexx)==1:
                     found  = True
                     myCat = cat
-                    index  = indexx
+                    index  = indexx[0]
                     break
     if not found:
         # get_gals is slow-ish but safe (require internet access!)
