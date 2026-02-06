@@ -10,9 +10,7 @@ import numpy as np
 from pathlib import Path
 import astropy.units as u
 from decimal import Decimal
-from datetime import datetime
 import matplotlib.pyplot as plt
-import astropy.constants as const
 from astropy.stats import sigma_clip
 from functools import cached_property 
 
@@ -20,8 +18,8 @@ from python_tools.tools import mkdir
 from python_tools.get_res import LoadClass
 from python_tools.get_res import load_whatever
 from astropy.cosmology import FlatLambdaCDM
-from get_gal_indexes import get_gals
 
+from get_gal_indexes import get_gals
 from get_gal_indexes import get_catpath
 from fnct import std_gal_dir,sim2galdir,galdir2sim,_count_part,_mass_part
 from fnct import part_data_path,std_sim,get_z_snap,prepend_str,get_snap,read_snap_header

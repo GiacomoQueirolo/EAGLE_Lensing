@@ -191,6 +191,8 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     fails if it can't produce a supercritical lens w. z_source<z_source_max and 
     Sigma(theta_min)>Sigma_crit
     """   
+    
+    # compute surface density within minimum theta_E 
     dens_at_thetamin = getDensAtRad(kw_2Ddens,min_thetaE_kpc)
     # add plot Sigma_encl vs theta
     Sigma_crit_min   = SigCrit(z_lens=Gal.z,z_source=z_source_max,cosmo=Gal.cosmo)
@@ -245,14 +247,19 @@ def _get_min_z_source(cosmo,z_lens,thresh_dens,z_source_max,verbose=True):
     if z_lens>z_source_max:
         raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
         #return 0 
+
+    # this is then the density threshold of this lens 
     thresh_dens  = ensure_unit(thresh_dens,u.Msun/(u.kpc**2))
-    
+    # to be considered a lens, this density has to be larger than the critical density 
+
+    # convert it into a ratio of angular diameter distances Ds / Dds
     thresh_DsDds = thresh_dens*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
     thresh_DsDds = thresh_DsDds.to("").value # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
 
     min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
     min_DsDds = min_DsDds.to("").value # dimensionless
-    
+
+    # since DsDds is a very smooth function, we just need to find if and where these meet
     z_source_range = np.linspace(z_lens+0.1,z_source_max,100) # it's a very smooth funct->
     DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
     if not min_DsDds<thresh_DsDds:
@@ -362,8 +369,11 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigma
     theta = r_sorted*arcXkpc
 
     Sigma_crit_arcsec2 = Sigma_crit/(arcXkpc**2)
+    Sigma_encl_arc2    = Sigma_encl/(arcXkpc**2)
 
-    thetaE = np.interp(Sigma_crit_arcsec2.value, Sigma_encl.value[::-1], theta[::-1].value)*theta.unit
+    assert Sigma_crit_arcsec2.unit==Sigma_encl_arc2.unit
+    
+    thetaE = np.interp(Sigma_crit_arcsec2.value, Sigma_encl_arc2.value[::-1], theta[::-1].value)*theta.unit
     print("theta_E_arcsec found",short_SciNot(np.round(thetaE,2)))
     if fig_Sig is None:
         fig,ax = plt.subplots(1)
@@ -373,8 +383,7 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigma
         ax.plot(theta,Sigma_encl,c="k")
     else:
         fig = fig_Sig
-    fig.axes[0].axhline(Sigma_crit_arcsec2.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ "
-                        + +" ["+str(Sigma_crit_arcsec2.unit)+"]")
+    fig.axes[0].axhline(Sigma_crit_arcsec2.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ "+" ["+str(Sigma_crit_arcsec2.unit)+"]= "+ str(short_SciNot(Sigma_crit_arcsec2.value)))
     fig.axes[0].axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="-",c="b")
     fig.axes[0].legend()
     nm_savefig = path/nm_sigmaplot

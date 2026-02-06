@@ -20,7 +20,7 @@ res_dir_base = Path("tmp/modelling_sim_lenses/")
 
 if __name__=="__main__":
     lens = wrapper_get_rnd_lens(reload=False)
-    res_dir = f"{res_dir_base}/{lens.name}"
+    res_dir = Path(f"{res_dir_base}/{lens.name}")
     mkdir(res_dir)
     plot_all(lens,skip_caustic=False)
 
@@ -78,7 +78,7 @@ if __name__=="__main__":
     cax = divider.append_axes('right', size='5%', pad=0.05)
     fig.colorbar(im0, cax=cax, orientation='vertical')   
     
-    nm = res_dir/f"{lens.name}_masked_im.png"
+    nm = f"{res_dir}/{lens.name}_masked_im.png"
     print(f"Saving {nm}")
     plt.savefig(nm)
     mask = mask_LD

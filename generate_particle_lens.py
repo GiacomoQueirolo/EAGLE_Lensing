@@ -641,8 +641,10 @@ class LensPart():
         kw_data_sim["noise_map"] = error_SimObs
         kw_psf_sim = SimObs.kwargs_psf
         # consider if to add psf error - depends on observations
-        kw_numerics_sim = {'point_source_supersampling_factor':kw_psf_sim["point_source_supersampling_factor"]} 
-
+        if "point_source_supersampling_factor" in kw_psf_sim.keys():
+            kw_numerics_sim = {'point_source_supersampling_factor':kw_psf_sim["point_source_supersampling_factor"]} 
+        else:
+            kw_numerics_sim = {'point_source_supersampling_factor':1}
         image_band      = [kw_data_sim, kw_psf_sim, kw_numerics_sim]
         multi_band_list = [image_band]
         return multi_band_list
