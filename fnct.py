@@ -36,14 +36,14 @@ def galdir2sim(gal_dir):
     sim      = str(sim_path.name)
     return sim
 
-def sim2galdir(sim,part_data_path=part_data_path):
-    sim_path = Path(part_data_path)/sim
+def sim2galdir(sim,part_path=part_data_path):
+    sim_path = Path(part_path)/sim
     gal_dir  = sim_path/"Gals"
     mkdir(gal_dir)
     return gal_dir
 
 # Where to store the galaxies
-std_gal_dir = sim2galdir(std_sim,part_data_path=part_data_path) 
+std_gal_dir = sim2galdir(std_sim,part_path=part_data_path) 
 
 # from https://dataweb.cosma.dur.ac.uk:8443/eagle-snapshots/
 # valid fo all sims apart the variable IMF runs
@@ -96,14 +96,14 @@ def prepend_str(str_i,ln_str,fill="0"):
         str_i=fill+str_i
     return str_i
 
-def get_files(sim,z=None,snap=None,_i_="*"):
+def get_files(sim,z=None,snap=None,_i_="*",part_path=part_data_path):
     """
     Find the files 
     If _i_ is specified, only that specific subsection of the snapshot (useful for DM)
     If no redshift/snapshots are defined, take all of them
     """
     
-    sim_path = part_data_path/sim
+    sim_path = Path(part_path)/sim
     # find the files
     _i_ = str(_i_)
     pstring = "???"
@@ -132,14 +132,15 @@ def get_files(sim,z=None,snap=None,_i_="*"):
     file_string = f"{prefix}{fix}{suffix}"
     files = glob.glob(file_string)
     # checking that the files are not empty
-    assert files != []
+    if files == []:
+        raise RuntimeError(f"Files not found:{file_string}")
     return files
 
 
-def read_snap_header(z=None,snap=None,sim=std_sim):
+def read_snap_header(z=None,snap=None,sim=std_sim,part_path=part_data_path):
     """Read various attributes from the header group. 
     """
-    file    = get_files(sim,z,snap,_i_=0)
+    file    = get_files(sim,z,snap,_i_=0,part_path=part_path)
     if len(file)!=1:
         print("file=",file)
         raise RuntimeError("Warning: define only one snapshot")

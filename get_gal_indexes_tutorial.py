@@ -26,7 +26,6 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,plo
     cat_path = get_catpath(min_mass=min_mass,\
                            min_z=min_z,max_z=max_z,\
                            gal_dir=gal_dir)
-    
     # select higher masses bc 1) lenses 2) else we have too many points
     myQuery = get_query(sim=sim,min_mass=min_mass,\
                         min_z=min_z,max_z=max_z)

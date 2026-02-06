@@ -79,6 +79,7 @@ class PartGal:
     def __init__(self, 
                  Gn, SGn,sim=std_sim, # identity of the galaxy
                  z=None,snap=None,    # redshift or snap
+                 part_dir=part_data_path, # where are stored the particles
                  gal_dir=std_gal_dir,     # where to store it
                  M=None,Centre=None): # these can be recovered
         self.sim      = sim
@@ -90,6 +91,7 @@ class PartGal:
         #Note: this is unique only within the snap
         self.Name     = f"Gn{self.Gn}SGn{self.SGn}" 
         self.gal_dir  = Path(gal_dir)
+        self.part_dir = Path(part_dir)
         # Mass and Centre can be recovered
         kw_MCntr      = get_kwMCntr(Gn,SGn,z=z,sim=sim)
         _M            = kw_MCntr["M"]
@@ -203,13 +205,13 @@ class PartGal:
         return  1/(self.a**aexp)
 
     def read_snap_header(self):
-        return read_snap_header(z=self.z,snap=self.snap,sim=self.sim)
-
+        return read_snap_header(z=self.z,snap=self.snap,sim=self.sim,part_path=self.part_dir)
+        
     def _init_path_snap(self):
         z_str          = prepend_str(str(int(self.z)),ln_str=3,fill="0")
         str_snap       = get_snap(self.z,3)
         fullsnap_str   = f"_{str_snap}_z{z_str}p???"
-        self.path_snap = f"{part_data_path}/{self.sim}/snapshot{fullsnap_str}/snap{fullsnap_str}"
+        self.path_snap = f"{self.part_dir}/{self.sim}/snapshot{fullsnap_str}/snap{fullsnap_str}"
         return 0
         
     def _initialise_parts(self):
