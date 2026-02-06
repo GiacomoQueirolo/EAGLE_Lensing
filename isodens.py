@@ -36,10 +36,14 @@ def get_kwiso(Lens,cutoff_rad=None,verbose=True,map_type="kappa"):
         cutoff_rad = get_iso_cutoff(Lens)
     cutoff_rad = ensure_unit(cutoff_rad,u.kpc)
     cutoff_rad = to_dimless(cutoff_rad)
+    image_rad  = ensure_unit(Lens.radius/Lens.arcXkpc,u.kpc)
+    image_rad  = to_dimless(image_rad)
+
     # the maps are, ATM, the same resolution as the alpha map -> could be recomputed taking _kappa_map(x,y)
-    if cutoff_rad<=to_dimless(Lens.radius):
+    if cutoff_rad<=image_rad:
         # if it's smaller, we don't care and we take the whole image 
         # (with original resolution)
+        cutoff_rad = image_rad
         if map_type =="kappa":
             map  = Lens.kappa_map
         elif map_type =="psi":
@@ -49,11 +53,14 @@ def get_kwiso(Lens,cutoff_rad=None,verbose=True,map_type="kappa"):
     else:
         print("Cutoff radius larger than pixel grid")
         # if it's larger, we expand the grid to it (giving up resolution in the way)
-        _radec = get_radius2radecgrid(cutoff_rad,Lens.pixel_num)
+        _radec = get_radius2radecgrid(cutoff_rad*Lens.arcXkpc,Lens.pixel_num)
         if map_type =="kappa":
             map  = Lens._kappa_map(_radec=_radec)
         elif map_type =="psi":
+            print("Warning - this might take a while")
             map    = Lens.compute_psi_map(_radec=_radec)
+        else:
+            _err_map_type(map_type)
 
     # x0, y0, sma(semimajor), eps(ellipticity=1-b/a), pa
     geom = EllipseGeometry(map.shape[0]/2., map.shape[1]/2., 10., 0.5, 0./180.*np.pi)
@@ -211,7 +218,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     x_plot = xmin + (x / Nx) * (xmax - xmin)
     y_plot = ymin + (y / Ny) * (ymax - ymin)
     ax3.plot(x_plot, y_plot, color='black')
-    name_plot = f"{savedir}/{map_type}_model.pdf"
+    name_plot = f"{savedir}/{map_type}_model.png"
     print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
@@ -245,7 +252,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     plt.ylabel('Y0-Ycnt [kpc]')
     
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35, wspace=0.35)
-    name_plot = f"{savedir}/{map_type}_prms1.pdf"
+    name_plot = f"{savedir}/{map_type}_prms1.png"
     print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
@@ -281,7 +288,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35, wspace=0.35)
     
-    name_plot = f"{savedir}/{map_type}_prms2.pdf"
+    name_plot = f"{savedir}/{map_type}_prms2.png"
     print(f"Saving {name_plot}")
     plt.tight_layout()
     plt.savefig(name_plot)
@@ -308,7 +315,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         ax.legend()
         ax.set_xlabel(r'log$_{10}$(Semimajor axis [kpc])')
         ax.set_ylabel(r'log$_{10}$('+map_nm+r'$)')
-        name_plot = f"{savedir}/{map_type}_map.pdf"
+        name_plot = f"{savedir}/{map_type}_map.png"
         print(f"Saving {name_plot}")
         plt.tight_layout()
         plt.savefig(name_plot)
@@ -325,7 +332,7 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         plt.xlabel(r"log$_{10}$r")
         plt.ylabel(r"$\gamma$(r)")
         plt.legend()
-        namefig = f"{savedir}/gamma_r.pdf"
+        namefig = f"{savedir}/gamma_r.png"
         print(f"Saving {namefig}")
         plt.savefig(namefig)
         plt.close()
@@ -349,8 +356,8 @@ def plot_isopot(Lens,savedir=None,cutoff_rad=None,pixel_num=None,verbose=True,kw
     del kw_res["isopot"]["map_type"]
     return kw_res
 
-def get_iso_cutoff(Lens,scale_cutoff=3):
-    cutoff_rad = Lens.thetaE*scale_cutoff/Lens.arcXkpc
+def get_iso_cutoff(Lens,scale_cutoff=2):
+    cutoff_rad = Lens.thetaE*scale_cutoff/Lens.arcXkpc #kpv
     print("Cutting plot at "+str(np.round(cutoff_rad,3))+", "+str(scale_cutoff)+" times the approx. theta_E")
     return cutoff_rad
 

@@ -1,4 +1,4 @@
-# compare output from model_sim with isodensity contour results from isophote4isodens_AMR
+# compare output from model_sim with isodensity contour results from isodens
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,7 +8,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from fnct import std_sim
 from generate_particle_lens import LoadLens,get_extents
-from isophote4isodens_AMR import get_kwisodens
+from isodens import get_kwisodens
 
 from python_tools.get_res import load_whatever
 from python_tools.tools import to_dimless
