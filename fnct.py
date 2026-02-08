@@ -23,7 +23,8 @@ from python_tools.tools import mkdir,to_dimless
 
 
 # data path
-part_data_path = Path("/pbs/home/g/gqueirolo/EAGLE/data/")
+#part_data_path = Path("/pbs/home/g/gqueirolo/EAGLE/data/")
+part_data_path = Path("./data/")
 # "Standard" simulation
 std_sim  = "RefL0025N0752"
 # use the following simulation only as test case

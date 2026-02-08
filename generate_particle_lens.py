@@ -42,7 +42,7 @@ min_thetaE = .3*u.arcsec #arcsec
 # Path definitions:
 
 # define where to store the obtained lenses classes
-std_sim_lens_path   = Path("/pbs/home/g/gqueirolo/EAGLE/sim_lens/")
+std_sim_lens_path   = Path("./sim_lens/")
 default_savedir_sim = "test_sim_lens_AMR" # subdirectory depending on the lensing algorithm
 
 def get_lens_dir(Gal,sim_lens_path=std_sim_lens_path):
