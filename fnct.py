@@ -46,7 +46,7 @@ def sim2galdir(sim,part_path=part_data_path):
 # Where to store the galaxies
 std_gal_dir = sim2galdir(std_sim,part_path=part_data_path) 
 
-print("./tmp will be a collector of intermediate, mildly useful plots/results, with the advantage of being easily accessible")
+# ./tmp will be a collector of intermediate, mildly useful plots/results, with the advantage of being easily accessible
 mkdir("./tmp")
 
 # from https://dataweb.cosma.dur.ac.uk:8443/eagle-snapshots/

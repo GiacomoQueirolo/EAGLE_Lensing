@@ -52,6 +52,8 @@ def get_kwiso(Lens,cutoff_rad=None,verbose=True,map_type="kappa"):
             _err_map_type(map_type)
     else:
         print("Cutoff radius larger than pixel grid")
+        print("cutoff_rad",cutoff_rad)
+        print("image_rad",image_rad)
         # if it's larger, we expand the grid to it (giving up resolution in the way)
         _radec = get_radius2radecgrid(cutoff_rad*Lens.arcXkpc,Lens.pixel_num)
         if map_type =="kappa":
@@ -65,9 +67,10 @@ def get_kwiso(Lens,cutoff_rad=None,verbose=True,map_type="kappa"):
     # x0, y0, sma(semimajor), eps(ellipticity=1-b/a), pa
     geom = EllipseGeometry(map.shape[0]/2., map.shape[1]/2., 10., 0.5, 0./180.*np.pi)
     geom.find_center(map)
+    print("Original guesstimate:", map.shape[0]/2., map.shape[1]/2.)
     ellipse = Ellipse(map, geometry=geom)
     isolist = ellipse.fit_image()
-
+    
     model = build_ellipse_model(map.shape, isolist)
     return {"isolist":isolist,"geom":geom,"map":map,"model":model,"cutoff_rad":cutoff_rad,"map_type":map_type}
 
