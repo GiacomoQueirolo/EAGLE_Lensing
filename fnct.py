@@ -122,7 +122,7 @@ def get_files(sim,z=None,snap=None,_i_="*",part_path=part_data_path):
             snap = get_snap(z)
         elif snap is not None:
             #zstr = str(get_z(snap))
-            _zstr = prefix.glob(prepend_str(snap,ln_str=3,fill="0")+"_z*")
+            _zstr = glob.glob(str(prefix)+prepend_str(snap,ln_str=3,fill="0")+"_z*")
             assert len(_zstr)==1
             zstr  = _zstr[0].split("_z")[1].split("p")[0]
         snap = prepend_str(snap,ln_str=3,fill="0")
@@ -145,7 +145,6 @@ def read_snap_header(z=None,snap=None,sim=std_sim,part_path=part_data_path):
         print("file=",file)
         raise RuntimeError("Warning: define only one snapshot")
     file      = file[0]
-    aexp,hexp = {},{}
     with h5py.File(file, 'r') as f:
         a       = f['Header'].attrs.get('Time')                # Scale factor.
         h       = f['Header'].attrs.get('HubbleParam')         # h = H0/(100km/s/Mpc)
