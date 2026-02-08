@@ -93,7 +93,7 @@ class PartGal:
         self.gal_dir  = Path(gal_dir)
         self.part_dir = Path(part_dir)
         # Mass and Centre can be recovered
-        kw_MCntr      = get_kwMCntr(Gn,SGn,z=z,sim=sim)
+        kw_MCntr      = get_kwMCntr(Gn,SGn,z=z,sim=sim,gal_dir=gal_dir)
         _M            = kw_MCntr["M"]
         _Centre       = kw_MCntr["Centre"]
         if M is not None:
@@ -395,7 +395,8 @@ def get_myCat(Gn,SGn,z,sim,min_mass="1e10",dz=0.05,gal_dir=std_gal_dir):
 
     # try first finding the exact one
     cat_path = get_catpath(min_mass=min_mass,\
-                           min_z=min_z,max_z=max_z)
+                           min_z=min_z,max_z=max_z,
+                          gal_dir=gal_dir)
     if os.path.isfile(cat_path):
         myCat = load_whatever(cat_path)
     else:
@@ -428,9 +429,10 @@ def get_myCat(Gn,SGn,z,sim,min_mass="1e10",dz=0.05,gal_dir=std_gal_dir):
     return myCat,index
     
 def get_kwMCntr(Gn,SGn,sim=std_sim,
-                z=None,snap=None):
+                z=None,snap=None,
+               gal_dir=std_gal_dir):
     z,snap       = get_z_snap(z,snap)
-    myCat,index  = get_myCat(Gn,SGn,z,sim)
+    myCat,index  = get_myCat(Gn,SGn,z,sim,gal_dir=gal_dir)
     Centre       = np.array([myCat["CMx"],myCat["CMy"],myCat["CMz"]]).T[index]
     kwMCntr      = {"M":myCat["M"][index],
                     "Centre":Centre}
