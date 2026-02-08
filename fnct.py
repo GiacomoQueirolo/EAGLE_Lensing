@@ -46,6 +46,9 @@ def sim2galdir(sim,part_path=part_data_path):
 # Where to store the galaxies
 std_gal_dir = sim2galdir(std_sim,part_path=part_data_path) 
 
+print("./tmp will be a collector of intermediate, mildly useful plots/results, with the advantage of being easily accessible")
+mkdir("./tmp")
+
 # from https://dataweb.cosma.dur.ac.uk:8443/eagle-snapshots/
 # valid fo all sims apart the variable IMF runs
 kw_snap_z = {"28":0, "27":0.1, "26":0.18, "25":0.27, "24":0.37, "23":0.5, "22":0.62, "21":0.74, "20":0.87, "19":1, "18":1.26, "17":1.49, "16":1.74, "15":2.01, "14":2.24, "13":2.48, "12":3.02, "11":3.53, "10":3.98, "9":4.49, "8":5.04, "7":5.49, "6":5.97, "5":7.05, "4":8.07, "3":8.99, "2":9.99, "1":15.13, "0":20}

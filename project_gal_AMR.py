@@ -21,6 +21,7 @@ from particle_galaxy import Gal2kwMXYZ,get_CM
 
 # for now keep this and check if still needed
 dir_name     = "proj_part_hist"
+
 def prep_Gal_projpath(Gal,dir_name=dir_name):
     # impractical but easy to set up
     Gal.proj_dir = Gal.gal_snap_dir/f"{dir_name}_{Gal.Name}/"
