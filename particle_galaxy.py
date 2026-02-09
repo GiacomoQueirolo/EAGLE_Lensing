@@ -12,7 +12,6 @@ import astropy.units as u
 from decimal import Decimal
 import matplotlib.pyplot as plt
 from astropy.stats import sigma_clip
-from functools import cached_property 
 
 from python_tools.tools import mkdir
 from python_tools.get_res import LoadClass
@@ -146,7 +145,7 @@ class PartGal:
     ########################
     ########################
     
-    @cached_property 
+    @property 
     def cosmo(self):
         return FlatLambdaCDM(H0=self.h*100, Om0=1-self.h)
     
