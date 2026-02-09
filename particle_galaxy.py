@@ -80,7 +80,8 @@ class PartGal:
                  z=None,snap=None,    # redshift or snap
                  part_dir=part_data_path, # where are stored the particles
                  gal_dir=std_gal_dir,     # where to store it
-                 M=None,Centre=None): # these can be recovered
+                 M=None,Centre=None, # these can be recovered
+                 read_prev=True):    # set to false only for debug
         self.sim      = sim
         z,snap        = get_z_snap(z,snap)
         self.snap     = snap
@@ -107,9 +108,7 @@ class PartGal:
         mkdir(self.gal_snap_dir)
         self.islens_file = self.gal_snap_dir/f"{self.Name}_islens.dll"
         
-        # only for DEBUGging you should set it false
-        self._read_prev = True
-        self.run(self._read_prev)
+        self.run(read_prev=read_prev)
 
     ### Class Structure ####
     ########################
@@ -160,15 +159,16 @@ class PartGal:
             islens = True
         return islens
         
-    def update_is_lens(self,islens,message=""):
-        islens = {"islens":islens,"message":message}
+    def update_is_lens(self,islens,message="",kw_islens={}):
+        kw_islens["islens"]  = islens
+        kw_islens["message"] = message
         with open(self.islens_file,"wb") as f:
-            dill.dump(islens,f)
+            dill.dump(kw_islens,f)
         return 0
 
-    def run(self,_read_prev=True):
+    def run(self,read_prev=True):
         upload_successful = False
-        if _read_prev:
+        if read_prev:
             upload_successful = self.upload_prev()
         if not upload_successful:
             # useful to check Center of Mass

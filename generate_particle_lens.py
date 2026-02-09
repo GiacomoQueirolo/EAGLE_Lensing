@@ -1,5 +1,5 @@
 """
-From randomly selected galaxies, read particles and GENerate Particles Lenses
+From randomly selected galaxies, read particles and generate Particles Lenses
 Revolves around the LensPart class, plus several helper functions
 """
 
@@ -47,7 +47,7 @@ default_savedir_sim = "test_sim_lens_AMR" # subdirectory depending on the lensin
 
 def get_lens_dir(Gal,sim_lens_path=std_sim_lens_path):
     #lens_dir = f"{sim_lens_path}/{Gal.sim}/snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}/"
-    lens_dir = sim_lens_path/Gal.sim/f"snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}"
+    lens_dir = Path(sim_lens_path)/Gal.sim/f"snap{Gal.snap}_G{Gal.Gn}.{Gal.SGn}"
     mkdir(lens_dir)
     Gal.lens_dir = lens_dir
     return lens_dir
@@ -87,7 +87,7 @@ def get_dataclasses(Sim,kwargs_source=kwargs_source_default):
         kwargs_numerics    = {'supersampling_factor': 1, 'supersampling_convolution': False}
         # Source Params
         source_model_class = Sim.source_model_class
-        kwargs_source      = get_kwargs_sourceSim(Sim)    
+        kwargs_source      = get_kwargs_sourceSim(Sim,kwargs_source=kwargs_source)
         return data_class,psf_class,source_model_class,kwargs_numerics,kwargs_source
 
 ##########################
@@ -139,7 +139,7 @@ class LensPart():
         self.kwlens_part   = kwlens_part
         self.PMLens        = PMLens(kwlens_part)
         self.PMLens_name   = self.PMLens.name
-        # cosmo prms
+        # cosmo params
         self.z_lens        = self.Gal.z
         self.cosmo         = self.Gal.cosmo
         self.arcXkpc       = self.cosmo.arcsec_per_kpc_proper(self.z_lens)
@@ -312,61 +312,78 @@ class LensPart():
         if read_prev:
             upload_successful = self.upload_prev()
         if not upload_successful:
-            # Read particles ONCE
-            # kwargs of Msun, XYZ in kpc (explicitely) centered around Centre of Mass (CM)
-            kw_parts         = Gal2kwMXYZ(self.Gal) 
-            # Compute projection
-            kwres_proj       = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
-                                                   z_source_max=self.z_source_max,
-                                                   sample_z_source=self.sample_z_source,
-                                                   min_thetaE=self.min_thetaE,
-                                                   arcXkpc=self.arcXkpc,verbose=verbose,
-                                                   save_res=True,reload=self.reload)
-            self.proj_index   = kwres_proj["proj_index"]
-            self.z_source_min = kwres_proj["z_source_min"]
-            self.z_source     = kwres_proj["z_source"]
-            self.MD_coords    = kwres_proj["MD_coords"]
-            if verbose:
-                print("Z source sampled:",self.z_source)
-            self.thetaE    = kwres_proj["thetaE"]
-            if verbose:
-                print("Approx. thetaE:",np.round(self.thetaE,3))
-            
-            # the following 2 can only be computed once we know the z_source:
-            self.SigCrit       = SigCrit(cosmo=self.cosmo,z_lens=self.z_lens,z_source=self.z_source) # Msun/kpc^2
+            # Lens Verification:
+            # check if it is a lens
+            self.verify_if_lens(verbose=verbose)
 
-            self.PMLens.setup(self) # only run now bc it needs z_source 
-            # Define the radius based on ~ theta_E
-            scale_tE       = 2 
-            self.radius    = self.thetaE*scale_tE
-            if verbose:
-                print("Image radius:",np.round(self.radius,3))
-    
-            Diam_arcsec      = 2*self.radius #diameter in arcsec
-            self.deltaPix    = Diam_arcsec/self.pixel_num # ''/pix
-            # update kwargs_band_sim:
-            self.kwargs_band_sim["pixel_scale"] = to_dimless(self.deltaPix)
-            # define Sim for the lens computations
-            # self.Sim DOES NOT contain lensing information, it's used only partially and carefully
-            self.Sim = SimAPI(numpix=self.pixel_num,
-                              kwargs_single_band=self.kwargs_band_sim,
-                              kwargs_model=self.kwargs_source_model,
-                              )
-            # in a similar way a posterior SimObs can be used to create images given different telescopes
+            # Lensing computations
+            ######################
+            self.create_lens(verbose=verbose)
             
-            # setup dataclasses (dataclass,psf_class,sourcemodel and some helper kwargs):
-            self.setup_dataclasses()
-            # setup imageModel:
-            self.set_imageModel()
-            # setup lenses 
-            self.setup_lenses()
-            # compute alpha map (most computationally intense function):
-            self.alpha_map
-            self.sample_source_pos(update=True)
-            self.image_sim  = self.get_lensed_image()
-            self.store()
-            # Assuming that if we got here, everything worked out fine:
-            self.Gal.update_is_lens(islens=True,message="No issues")
+    def verify_if_lens(self,verbose=True):            
+        # Read particles ONCE
+        # kwargs of Msun, XYZ in kpc (explicitely) centered around Centre of Mass (CM)
+        kw_parts         = Gal2kwMXYZ(self.Gal) 
+        # Compute projection
+        kwres_proj       = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
+                                               z_source_max=self.z_source_max,
+                                               sample_z_source=self.sample_z_source,
+                                               min_thetaE=self.min_thetaE,
+                                               arcXkpc=self.arcXkpc,verbose=verbose,
+                                               save_res=True,reload=self.reload)
+        # store results
+        self.proj_index   = kwres_proj["proj_index"]
+        self.z_source_min = kwres_proj["z_source_min"]
+        self.z_source     = kwres_proj["z_source"]
+        self.MD_coords    = kwres_proj["MD_coords"]
+        if verbose:
+            print("Z source sampled:",self.z_source)
+        self.thetaE    = kwres_proj["thetaE"]
+        if verbose:
+            print("Approx. thetaE:",np.round(self.thetaE,3))
+        
+        # the following 2 can only be computed once we know the z_source:
+        self.SigCrit       = SigCrit(cosmo=self.cosmo,z_lens=self.z_lens,z_source=self.z_source) # Msun/kpc^2
+        self.Gal.update_is_lens(islens=True,message="The galaxy is supercritical",
+                                kw_islens={"thetaE":self.thetaE,"z_source_min":self.z_source_min})
+
+    def create_lens(self,verbose=True):
+        # setup lensing keywords
+        self.PMLens.setup(self) # only run now bc it needs z_source 
+        
+        # Define the radius based on ~ theta_E
+        scale_tE       = 2 
+        self.radius    = self.thetaE*scale_tE
+        if verbose:
+            print("Image radius:",np.round(self.radius,3))
+        Diam_arcsec      = 2*self.radius #diameter in arcsec
+        self.deltaPix    = Diam_arcsec/self.pixel_num # ''/pix
+        # update kwargs_band_sim:
+        self.kwargs_band_sim["pixel_scale"] = to_dimless(self.deltaPix)
+        # define Sim for the lens computations
+        # self.Sim DOES NOT contain lensing information, it's used only partially and carefully
+        self.Sim = SimAPI(numpix=self.pixel_num,
+                          kwargs_single_band=self.kwargs_band_sim,
+                          kwargs_model=self.kwargs_source_model,
+                          )
+        # in a similar way a posterior SimObs can be used to create images given different telescopes
+        
+        # setup dataclasses (dataclass,psf_class,sourcemodel and some helper kwargs):
+        self.setup_dataclasses()
+        # setup imageModel:
+        self.set_imageModel()
+        # setup lenses 
+        self.setup_lenses()
+        # compute alpha map (most computationally intense function):
+        self.alpha_map
+        self.sample_source_pos(update=True)
+        self.image_sim  = self.get_lensed_image()
+        # Store the results
+        self.store()
+        # Assuming that if we got here, everything worked out fine:
+        self.Gal.update_is_lens(islens=True,message="The ",
+                                kw_islens={"thetaE":self.thetaE,"z_source_min":self.z_source_min})
+
 
     def setup_dataclasses(self,Sim=None):
         if Sim is None:
@@ -541,24 +558,7 @@ class LensPart():
         kappa = get_2Dkappa_map(Gal=self.Gal,proj_index=self.proj_index,MD_coords=self.MD_coords,kwargs_extents=kw_extents,
                                 SigCrit=self.SigCrit,arcXkpc=self.arcXkpc)
         return kappa
-    """
-    @property
-    def psi_map(self):
-        # if psi_map has not been computed yet, computes it
-        # and stores it
-        # if it has, just returns the values
-        if "_psi_map" not in self.__dict__: #must be in this version!
-            _ = self._psi_map
-            self.store()
-        return self._psi_map
-    @cached_property 
-    def _psi_map(self):
-        # this is not meant to be computed in the run function, so we have yet
-        # another wrapper function around it to ensure its results are stored
-        # after computation (see @property def psi_map)
-        return self.compute_psi_map(_radec=None)
-    """
-    
+        
     @cached_property
     def psi_map(self):
         psi = self.compute_psi_map(_radec=None)
@@ -943,18 +943,23 @@ def get_extents(arcXkpc,Model=None,_radec=None):
     return kw_extents
 
 # get a lens no matter what:
-def wrapper_get_rnd_lens(reload=True):
+def wrapper_get_rnd_lens(reload=True,
+                        kw_lenspart={}):
     """Try to get a lens from random galaxies, repeat until finds one
     which is an actual lens (i.e. supercritical)
     """
+    
+    default_kw_lenspart={"kwlens_part":kwlens_part_AS,
+                     "z_source_max":z_source_max,
+                     "kwargs_band_sim":kwargs_band_sim,
+                     "pixel_num":pixel_num,
+                     "reload":reload,
+                     "savedir_sim":default_savedir_sim}
+    kw_lenspart = default_kw_lenspart.update(kw_lenspart)
     while True:
         Gal    = get_rnd_PG()
         mod_LP = LensPart(Galaxy=Gal,
-                          kwlens_part=kwlens_part_AS,
-                          z_source_max=z_source_max, 
-                          kwargs_band_sim=kwargs_band_sim,
-                          pixel_num=pixel_num,reload=reload,
-                          savedir_sim=default_savedir_sim)
+                          **kw_lenspart)
         try:
             mod_LP.run()
             break
