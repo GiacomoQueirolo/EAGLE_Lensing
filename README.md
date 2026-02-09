@@ -9,8 +9,10 @@ The place-holder name references the fact that this code was developed on the EA
 ```bash
 git clone https://github.com//GiacomoQueirolo/EAGLE_Lensing
 cd EAGLE_Lensing
-mamba env create -f bird_watcher_env.yml
-mamba activate bird_watcher
+echo "for the following 2 commands you can alternatively use conda instead of mamba"
+mamba env create -f bird_watcher_env.yaml
+mamba activate bird_watcher_env
 pip install -e .
 jupyter #open Tutorial.ipynb
 ```
+
