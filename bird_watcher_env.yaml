@@ -6,7 +6,7 @@ dependencies:
   - numpy
   - scipy
   - numba
-  - astropy=7.2.0
+  - astropy=7.0.1
   - photutils
   - matplotlib
   - scikit-image

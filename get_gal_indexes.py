@@ -12,7 +12,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 from fnct import std_sim,std_gal_dir
-from sql_connect import exec_query
 from python_tools.tools import short_SciNot
 from python_tools.get_res import load_whatever
 
@@ -58,6 +57,9 @@ def get_gals(sim=std_sim,min_mass = "1e12",min_z="0",max_z="2",save_pkl=True,plo
         if not found_prev:
             check_prev = False            
     if not check_prev:
+        # loads only if needed (avoid issues for tutorial)
+        # TODO: implement more secure way to deal with password handling
+        from sql_connect import exec_query
         myData = exec_query(myQuery)
         # Store it/update 
         with open(cat_path,"wb") as f:

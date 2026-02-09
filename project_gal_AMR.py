@@ -213,14 +213,12 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     if np.any(Sigma_crit_min_arc<Sigma_encl_arc):
         theta_E_max = theta[np.argmin(np.abs(Sigma_crit_min_arc-Sigma_encl_arc))]
         ax.axvline(to_dimless(theta_E_max),label=r"$\theta_E(z_{s,max})$="+str(short_SciNot(theta_E_max)),ls="--",c="b")
+    # set limit to 5*min_thetaE
+    ax.set_xlim(0,5*to_dimless(min_thetaE))
     ax.set_xlabel(r'$\theta$ ["]')
     ax.set_ylabel(r"$\Sigma$ ["+str(Sigma_encl_arc.unit)+"]")
     ax.set_title(r"$\Sigma_{encl}$")
     ax.legend()
-    #fig.savefig(savenameSigmaEnc)
-    #plt.close(fig)
-    #fig.savefig("tmp/Sigma_enc.png")
-    #print(f"Saving {savenameSigmaEnc}")
 
     # define the z_source_min:        
     z_source_min = _get_min_z_source(cosmo=Gal.cosmo,z_lens=Gal.z,
@@ -387,6 +385,9 @@ def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigma
     fig.axes[0].axhline(Sigma_crit_arcsec2.value,ls="-.",c="r",label=r"$\Sigma_{crit}$ "+" ["+str(Sigma_crit_arcsec2.unit)+"]= "+ str(short_SciNot(Sigma_crit_arcsec2.value)))
     fig.axes[0].axvline(to_dimless(thetaE),label=r"$\theta_E$="+str(short_SciNot(thetaE)),ls="-",c="b")
     fig.axes[0].legend()
+    # enforce a cutout of 5 thetaE
+    fig.axes[0].set_xlim(0,5*to_dimless(thetaE))
+    
     nm_savefig = path/nm_sigmaplot
     print(f"Saving {nm_savefig}")
     fig.savefig(nm_savefig)
@@ -485,5 +486,5 @@ def plot_amr_cells(kw_2Ddens):
     sm = ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])  # required for colorbar
     cbar = fig.colorbar(sm, ax=ax)
-    cbar.set_label("Density")
+    cbar.set_label(f"Density [{dns_unit}]")
     return fig,ax
