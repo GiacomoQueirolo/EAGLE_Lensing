@@ -7,7 +7,7 @@ The place-holder name references the fact that this code was developed on the EA
 ## Quickstart
 
 ```bash
-git clone https://github.com//GiacomoQueirolo/EAGLE_Lensing
+git clone git@github.com:GiacomoQueirolo/EAGLE_Lensing
 cd EAGLE_Lensing
 echo "for the following 2 commands you can alternatively use conda instead of mamba"
 mamba env create -f bird_watcher_env.yaml
