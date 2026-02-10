@@ -13,6 +13,6 @@ echo "for the following 2 commands you can alternatively use conda instead of ma
 mamba env create -f bird_watcher_env.yaml
 mamba activate bird_watcher_env
 pip install -e .
-jupyter #open Tutorial.ipynb
+jupyter notebook Tutorial.ipynb 
 ```
 
