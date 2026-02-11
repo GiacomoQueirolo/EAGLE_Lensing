@@ -28,7 +28,7 @@ from particle_galaxy import get_rnd_PG,Gal2kwMXYZ,LoadGal
 from particle_lenses import PMLens 
 from particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
 # project galaxy along various axis
-from project_gal_AMR import get_2Dkappa_map,prep_Gal_projpath,projection_main_AMR
+from project_gal_AMR import get_2Dkappa_map,ProjGal,projection_main_AMR
 from project_gal_AMR import Gal2kw_samples,ProjectionError
 
 # default parameters:
@@ -108,6 +108,7 @@ class LensPart():
                  Galaxy,
                  kwlens_part, # if PM or AS, and if so size of the core
                  pixel_num=pixel_num, # sim prms 
+                 kw_additional_lenses=None, # additional lenses (e.g. LOS)
                  z_source_max  = z_source_max,     # for z_source sampling
                  min_thetaE = min_thetaE,
                  source_model_list=source_model_list, # this might not be the most efficient way to do it..
@@ -116,20 +117,21 @@ class LensPart():
                  sim_lens_path=std_sim_lens_path,
                  reload=True # reload previous lens
                  ):
-        Galaxy             = prep_Gal_projpath(Galaxy) # just set up some directories
+
+        # Wrapper class of PartGal to extend for projections
+        Galaxy             = ProjGal(Galaxy) 
         # setup of data
         self.Gal           = Galaxy
         self.Gal_path      = Galaxy.pkl_path
         self.Gal_name      = Galaxy.Name # must be stored
-        # if reload, check if Gal is already a lens - if it isn't, raise error
+        # if reload, check if Gal is a lens - if it isn't, raise error
         if reload:
-            if not self.Gal.is_lens:
-                print(load_whatever(self.Gal.islens_file)["message"])
+            if not self.Gal.is_lens(z_source_max=z_source_max,
+                                   min_thetaE=min_thetaE):
                 raise RuntimeError("Previously defined as not a lens")
         
         lens_dir           = get_lens_dir(self.Gal,sim_lens_path=sim_lens_path)
         self.savedir_sim   = savedir_sim
-        #self.savedir       = f"{lens_dir}/{savedir_sim}"
         self.savedir       = lens_dir/savedir_sim
         self.reload        = reload
         mkdir(self.savedir)
@@ -138,15 +140,15 @@ class LensPart():
         self.pixel_num     = pixel_num      
         self.kwlens_part   = kwlens_part
         self.PMLens        = PMLens(kwlens_part)
-        self.PMLens_name   = self.PMLens.name
+        # additional lenses
+        self.kw_additional_lenses = kw_additional_lenses
         # cosmo params
         self.z_lens        = self.Gal.z
         self.cosmo         = self.Gal.cosmo
         self.arcXkpc       = self.cosmo.arcsec_per_kpc_proper(self.z_lens)
 
-        # To obtain the z_source and projection index 
-        #-> computed only once in the run function
-        self.z_source_max  = z_source_max        
+        # criteria for supercriticality of the lens
+        self.z_source_max  = z_source_max
         self.min_thetaE    = ensure_unit(min_thetaE,u.arcsec) #arcsec
         
         # observational params
@@ -238,7 +240,7 @@ class LensPart():
         """
         # reload Galaxy
         Galaxy = LoadGal(self.Gal_path)
-        Galaxy = prep_Gal_projpath(Galaxy)
+        Galaxy = ProjGal(Galaxy)
         self.Gal   = Galaxy
         self.Gal_name = Galaxy.Name # unsure why this is needed
         self.cosmo = Galaxy.cosmo
@@ -273,7 +275,7 @@ class LensPart():
     @property
     def name(self):
         # define name and path of savefile
-        return f"{self.Gal_name}_Npix{self.pixel_num}_Part{self.PMLens_name}"
+        return f"{self.Gal_name}_Npix{self.pixel_num}_Part{self.PMLens.name}"
     @property
     def pkl_path(self):
         return self.savedir/f"{self.name}.pkl"
@@ -313,24 +315,27 @@ class LensPart():
             upload_successful = self.upload_prev()
         if not upload_successful:
             # Lens Verification:
-            # check if it is a lens
-            self.verify_if_lens(verbose=verbose)
+            ####################
+            # project and check if it is a lens
+            self.galaxy_projection(verbose=verbose)
 
             # Lensing computations
             ######################
             self.create_lens(verbose=verbose)
             
-    def verify_if_lens(self,verbose=True):            
+    def galaxy_projection(self,verbose=True):            
         # Read particles ONCE
         # kwargs of Msun, XYZ in kpc (explicitely) centered around Centre of Mass (CM)
         kw_parts         = Gal2kwMXYZ(self.Gal) 
         # Compute projection
-        kwres_proj       = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
+        kwres_proj_res    = projection_main_AMR(Gal=self.Gal,kw_parts=kw_parts,
                                                z_source_max=self.z_source_max,
                                                sample_z_source=self.sample_z_source,
                                                min_thetaE=self.min_thetaE,
                                                arcXkpc=self.arcXkpc,verbose=verbose,
-                                               save_res=True,reload=self.reload)
+                                               reload=self.reload)
+        # load latest successful projection
+        kwres_proj = kwres_proj_res["projs"][-1]
         # store results
         self.proj_index   = kwres_proj["proj_index"]
         self.z_source_min = kwres_proj["z_source_min"]
@@ -342,14 +347,14 @@ class LensPart():
         if verbose:
             print("Approx. thetaE:",np.round(self.thetaE,3))
         
-        # the following 2 can only be computed once we know the z_source:
-        self.SigCrit       = SigCrit(cosmo=self.cosmo,z_lens=self.z_lens,z_source=self.z_source) # Msun/kpc^2
-        self.Gal.update_is_lens(islens=True,message="The galaxy is supercritical",
-                                kw_islens={"thetaE":self.thetaE,"z_source_min":self.z_source_min})
+        # the following can only be computed once we know the z_source:
+        self.SigCrit       = SigCrit(cosmo=self.cosmo,
+                                     z_lens=self.z_lens,
+                                     z_source=self.z_source) # Msun/kpc^2
 
     def create_lens(self,verbose=True):
         # setup lensing keywords
-        self.PMLens.setup(self) # only run now bc it needs z_source 
+        self.PMLens.setup(self) # only run now as it needs z_source 
         
         # Define the radius based on ~ theta_E
         scale_tE       = 2 
@@ -380,12 +385,12 @@ class LensPart():
         self.image_sim  = self.get_lensed_image()
         # Store the results
         self.store()
-        # Assuming that if we got here, everything worked out fine:
-        self.Gal.update_is_lens(islens=True,message="The ",
-                                kw_islens={"thetaE":self.thetaE,"z_source_min":self.z_source_min})
-
 
     def setup_dataclasses(self,Sim=None):
+        """
+        Define all classes not dependent on lensing
+        Handled by SimAPI
+        """
         if Sim is None:
             Sim = self.Sim
         self.data_class,self.psf_class,self.source_model_class,self.kwargs_numerics,self.kwargs_source = get_dataclasses(Sim)
@@ -396,10 +401,23 @@ class LensPart():
         self.kwargs_source["center_x"]= ra_source
         self.kwargs_source["center_y"]= dec_source
         return 0
-        
+
+    def setup_lenses(self):
+        """
+        Setup lensing parameters tailored for lenstronomy
+        first compute the particle lenses
+        if present, add the additional lenses components
+        """
+        self.setup_particle_lenses()
+        if self.kw_additional_lenses:
+            kw_add_lens = self.kw_additional_lenses["kwargs_lens"]
+            lm_add_lens = self.kw_additional_lenses["lens_model"]
+            self.lens_model = [lm_add_lens,*self.lens_model]
+            self.kwargs_lens = [kw_add_lens,*self.kwargs_lens]
+        return 0
     # the following is meant to be rerun every time we load the class to save space
     # -> computationally not intense 
-    def setup_lenses(self):
+    def setup_particle_lenses(self):
         print("Setting up lensing parameters...")
         # Convert x,y,z in samples and get masses
         kw_samples = Gal2kw_samples(Gal=self.Gal,proj_index=self.proj_index,
@@ -970,5 +988,5 @@ def wrapper_get_rnd_lens(reload=True,
 
 
 if __name__ == "__main__":
-    print("Do not run this script, but test/test_generate_particle_lens.py")
+    print("Do not run this script, but test_generate_particle_lens.py")
     exit()

@@ -25,7 +25,8 @@ if __name__ == "__main__":
     #mod_LP = wrapper_get_rnd_lens(reload=False)
     Gal    = PartGal(5,0,
                  z=None,snap="20",    # redshift or snap
-                 M=None,Centre=None)
+                 M=None,Centre=None,
+                 reload=False)
     mod_LP = LensPart(Galaxy=Gal,kwlens_part=kwlens_part_AS,
                        z_source_max=z_source_max, 
                        pixel_num=pixel_num,reload=False,savedir_sim="test_sim_lens_AMR")

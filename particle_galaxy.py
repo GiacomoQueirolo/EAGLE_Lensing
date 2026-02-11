@@ -1,5 +1,5 @@
 """
-Define the Galaxy Class (storing all particle data), as well as related helper functions, e.g. to sample galaxies 
+Define the galaxy class PartGal (storing all particle data), as well as related helper functions, e.g. to sample galaxies 
 """
 
 import os
@@ -81,7 +81,7 @@ class PartGal:
                  part_dir=part_data_path, # where are stored the particles
                  gal_dir=std_gal_dir,     # where to store it
                  M=None,Centre=None, # these can be recovered
-                 read_prev=True):    # set to false only for debug
+                 reload=True):    # set to false only for debug
         self.sim      = sim
         z,snap        = get_z_snap(z,snap)
         self.snap     = snap
@@ -106,9 +106,9 @@ class PartGal:
 
         # all paths are dealt as properties
         mkdir(self.gal_snap_dir)
-        self.islens_file = self.gal_snap_dir/f"{self.Name}_islens.dll"
+        #self.islens_file = self.gal_snap_dir/f"{self.Name}_islens.dll"
         
-        self.run(read_prev=read_prev)
+        self.run(reload=reload)
 
     ### Class Structure ####
     ########################
@@ -148,28 +148,19 @@ class PartGal:
     def cosmo(self):
         return FlatLambdaCDM(H0=self.h*100, Om0=1-self.h)
     
-    # useful check if it is a lens:
-    @property
-    def is_lens(self):
-        # bool if galaxy is a lens
-        try:
-            islens = load_whatever(self.islens_file)["islens"]
-        except FileNotFoundError:
-            # If file is not there, we assume it is as lens
-            islens = True
-        return islens
-        
+
+    """
     def update_is_lens(self,islens,message="",kw_islens={}):
         kw_islens["islens"]  = islens
         kw_islens["message"] = message
         with open(self.islens_file,"wb") as f:
             dill.dump(kw_islens,f)
         return 0
-
-    def run(self,read_prev=True):
+    """
+    def run(self,reload=True):
         upload_successful = False
-        if read_prev:
-            upload_successful = self.upload_prev()
+        if reload:
+            upload_successful = self.upload_prev(reload=reload)
         if not upload_successful:
             # useful to check Center of Mass
             self.xy_propr2comov = self.prop2comov("Coordinates") 
@@ -182,8 +173,8 @@ class PartGal:
             self._verify_cnt()
             self.store_gal()
 
-    def upload_prev(self):
-        if not self._read_prev:
+    def upload_prev(self,reload=True):
+        if not reload:
             return False
         prev_Gal = ReadGal(self)
         if prev_Gal is False or prev_Gal != self:

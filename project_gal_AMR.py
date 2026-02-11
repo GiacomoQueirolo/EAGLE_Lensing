@@ -12,6 +12,7 @@ from matplotlib.cm import ScalarMappable
 
 import astropy.units as u
 import astropy.constants as const
+from scipy.interpolate import interp1d
 
 from python_tools.tools import mkdir,to_dimless,ensure_unit,short_SciNot
 from python_tools.get_res import load_whatever
@@ -19,15 +20,40 @@ from python_tools.get_res import load_whatever
 from lib_cosmo import SigCrit
 from particle_galaxy import Gal2kwMXYZ,get_CM
 
-# for now keep this and check if still needed
-dir_name     = "proj_part_hist"
+# standard directory 
+dir_name     = "Projection"
 
-def prep_Gal_projpath(Gal,dir_name=dir_name):
-    # impractical but easy to set up
-    Gal.proj_dir = Gal.gal_snap_dir/f"{dir_name}_{Gal.Name}/"
-    mkdir(Gal.proj_dir)
-    Gal.projection_path = Gal.proj_dir/"projection.pkl"
-    return Gal
+# Wrapper class of PartGal that extend it to
+# deal with the projection components
+class ProjGal:
+    def __init__(self,Gal,proj_dir_name=dir_name):
+        self._gal = Gal
+        self.proj_dir_name = f"{proj_dir_name}_{Gal.Name}"
+        self.proj_dir = Path(Gal.gal_snap_dir)/self.proj_dir_name 
+        mkdir(self.proj_dir)
+        self.projection_path = self.proj_dir/"projection.pkl"
+        
+    def __getattr__(self,name):
+        return getattr(self._gal,name)
+
+    # useful check if it is a lens:
+    def is_lens(self,z_source_max,min_thetaE):
+        try:
+            kw_res_proj = load_whatever(self.projection_path)
+            is_lens = False
+            # simply check if at least one proj. is supercritical
+            for kw_prj in kw_res_proj["projs"]:
+                verify_if_lens = kw_prj["verify_lens"]
+                if verify_if_lens(z_source_max=z_source_max,
+                                   min_thetaE=min_thetaE) is not np.nan:
+                    is_lens = True                    
+                    break
+        except FileNotFoundError:
+            # If file is not there, we assume it is 
+            # (rather, could be) a lens
+            islens = True
+        return islens
+        
 
 
 def proj_parts(kw_parts,proj_index):    
@@ -66,121 +92,116 @@ class ProjectionError(Exception):
         return self.message
         
 def projection_main_AMR(Gal,kw_parts,z_source_max,sample_z_source,min_thetaE,
-                    arcXkpc=None,verbose=True,save_res=True,reload=True):
-    # this is going to be the main function:
-    # - for each projection:
-    #       - find center and densest bin iteratively:
-    #           - output:
-    #               -  MD (mode/maximum density) coord
-    #               -  MD value
-    #               -  ~best 2D density histogram~ -> too large and easy to recover
-    #                       - instead: nbins/pixel_num is fixed, give best cutout  
-    #       - test if said densest bin is enough to be a SGL  
-    #       - return:
-    #              - projection
-    #              - z_min
-    #              - MD coord
-    #              - theta_E (approx) centered around MD -
-    # try all projection in order to obtain a lens
+                    arcXkpc=None,verbose=True,reload=True):
+    """
+    Main projection function:
+    - iteratively, for each projection:
+        - project particles on plane
+        - create AMR
+        - find center (coord of densest cell):
+               - MD (mode/maximum density) coord
+               - MD value
+               - AMR cells
+        - 
+           - return:
+                  - projection
+                  - z_min
+                  - MD coord
+                  - theta_E (approx) centered around MD -
+    """
     proj_index = 0
-    kw_res     = None
-    # if present and reload: -> not sure if this is to be done
-    try:
-        assert reload
-        kw_res = load_whatever(Gal.projection_path)
-        print(f"Found and loaded projection from : {Gal.projection_path}")
-        return kw_res
-    except AssertionError:
-        pass
-    except Exception as e :
-        if verbose:
-            print("Failed to load because "+str(e))
-            print("Recomputing projection ...")
-        pass
+    
+    kw_proj_res = {"projs":[]} 
+    # if present and reload:
+    if reload:
+        try:
+            kw_proj_res = load_whatever(Gal.projection_path)
+            print(f"Found and loaded projection from : {Gal.projection_path}")
+            return kw_proj_res
+        except Exception as e :
+            if verbose:
+                print("Failed to load because "+str(e))
+                print("Recomputing projection ...")
+            pass
     # else compute it
     if arcXkpc is None:
         arcXkpc = Gal.cosmo.arcsec_per_kpc_proper(Gal.z)
 
     min_thetaE_kpc = min_thetaE/arcXkpc 
-
+    proj_supercrit = False
     while proj_index<3:
-        try:
-            kw_proj = {"proj_index":proj_index}
-            # Project the particles 
-            kw_parts_proj = project_kw_parts(kw_parts=kw_parts,proj_index=proj_index)
+        kw_proj = {"proj_index":proj_index}
+        # Project the particles 
+        kw_parts_proj = project_kw_parts(kw_parts=kw_parts,proj_index=proj_index)
 
-            # compute 2D density AMR density map
-            kw_2Ddens = dens_map_AMR(kw_parts_proj=kw_parts_proj,
-                                      verbose=verbose)
+        # compute 2D density AMR density map (parallelised)
+        kw_2Ddens = dens_map_AMR(kw_parts_proj=kw_parts_proj,
+                                  verbose=verbose)
+        
+        savenameSigmaEnc =Gal.proj_dir/f"Sigma_enc_proj{proj_index}.png"
 
-            savenameSigmaEnc =Gal.proj_dir/f"Sigma_enc_proj{proj_index}.png"
-            kw_z_min = get_min_z_source(Gal=Gal,min_thetaE_kpc=min_thetaE_kpc,
-                                      kw_2Ddens=kw_2Ddens,
-                                      z_source_max=z_source_max,
-                                      savenameSigmaEnc=savenameSigmaEnc,verbose=verbose)
-            
+        # get range of source redshift
+        kw_z_min = get_min_z_source(Gal=Gal,min_thetaE_kpc=min_thetaE_kpc,
+                                  kw_2Ddens=kw_2Ddens,
+                                  z_source_max=z_source_max,
+                                  savenameSigmaEnc=savenameSigmaEnc,verbose=verbose)
+        if kw_z_min["z_source_min"] is np.nan:
+            if verbose:
+                print("This projection of the galaxy does not lead to a supercritical lens. \
+Rerun trying different projection")
+            # store the kw_z_min
+            kw_res = kw_proj | kw_z_min 
+            kw_proj_res["projs"].append(kw_res)
+            proj_index+=1
+        else:
             # sample z_source
             z_source = sample_z_source(z_source_min = kw_z_min["z_source_min"],z_source_max=z_source_max)
             kw_z_min["z_source"] = z_source
             
             # get an estimate of theta_E 
-            thetaE = get_rough_thetaE_PLL(kw_2Ddens,Gal.cosmo,Gal.z,z_source,path=Gal.proj_dir,fig_Sig=kw_z_min["fig_Sig"])
-            
+            thetaE = get_rough_thetaE(kw_2Ddens,Gal.cosmo,Gal.z,z_source,path=Gal.proj_dir,fig_Sig=kw_z_min["fig_Sig"])
+    
+            # AMR is not stored bc fairly large and not too long to compute
             del kw_2Ddens["AMR_cells"] 
             del kw_z_min["fig_Sig"]
             kw_thetaE = {"thetaE":thetaE} 
                         
             kw_res  = kw_proj|kw_2Ddens|kw_z_min|kw_thetaE
+            kw_proj_res["projs"].append(kw_res)
+            proj_supercrit = True
             break
-        except ProjectionError as PE:
-            print(PE)
-            # should only be if the minimum z_source is higher than the maximum z_source
-            # try with other proj
-            proj_index+=1
-    if kw_res is None:
-        print("M(gal)",short_SciNot(Gal.M_tot))
-        print("z_gal",Gal.z)
-        proj_message = "\nThere is no projection of the galaxy that create a lens given the z_source_max\n"
-        Gal.update_is_lens(islens=False,message=proj_message)
-        raise ProjectionError(proj_message)
-    else:
-        if save_res:
-            with open(Gal.projection_path,"wb") as f:
-                dill.dump(kw_res,f)
-            print(f"Saved {Gal.projection_path}")
-        return kw_res
 
-#from AMR2D import AMR_density
+    with open(Gal.projection_path,"wb") as f:
+        dill.dump(kw_proj_res,f)
+    print(f"Saved {Gal.projection_path}")
+
+    if proj_supercrit is False:
+        if verbose:
+            print("M(gal)",short_SciNot(Gal.M_tot))
+            print("z_gal",Gal.z)
+        proj_message = "\nThere is no projection of the galaxy that create a lens given the constraints\n"
+        raise ProjectionError(proj_message)
+
+    return kw_proj_res
+
+
 from AMR2D_PLL import AMR_density_PLL
 def dens_map_AMR(kw_parts_proj,
                   max_particles=100,
                   min_area=0.1*u.kpc*u.kpc,
                   dens_thresh = 0.*u.Msun/(u.kpc**2),
                   verbose=True):
-    # returns: kw_2Ddens["MD_value"][u.Msun/(u.kpc**2),1] 
-    #          kw_2Ddens["MD_coord"][arcsec,2]
-    #          kw_2Ddens["AMR_cells"][cells,N]
-    
+    """ 
+    returns: kw_2Ddens["MD_value"][u.Msun/(u.kpc**2),1] 
+             kw_2Ddens["MD_coord"][arcsec,2]
+             kw_2Ddens["AMR_cells"][cells,N]
+    """
     Ms = np.asarray(kw_parts_proj["Ms"].to("Msun"))*u.Msun
     Xs = np.asarray(kw_parts_proj["Xs"].to("kpc"))*u.kpc
     Ys = np.asarray(kw_parts_proj["Ys"].to("kpc"))*u.kpc
-    """
-    # Get density map (dimensional)
-    x  = np.asarray(Xs.to("kpc").value) #kpc
-    y  = np.asarray(Ys.to("kpc").value) #kpc
-    m  = np.asarray(Ms.to("solMass").value)  # M_sol
-    """
-    #AMR_cells = AMR_density(Xs,Ys,Ms,max_particles=max_particles,min_area=min_area)
+
     # units are stripped by numba - have to "reattach" them "by hand"
     AMR_cells = AMR_density_PLL(Xs,Ys,Ms, max_particles=max_particles, min_area=min_area,dens_thresh=dens_thresh)
-    """
-    print("DEBUG")
-    tmp_amr_name = "tmp/del_amr_cells.pkl"
-    print(f"Saving {tmp_amr_name})
-    with open(tmp_amr_name,"wb") as f:
-        dill.dump(AMR_cells,f)
-    """
-    #MD_coords_kpc,MD_value = get_MDfromAMRcells(AMR_cells)
     # use parallelised version - faster 
     MD_coords,MD_value = get_MDfromAMRcells_PLL(AMR_cells) 
     # Note: all inputs are still in kpc
@@ -191,6 +212,8 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     """Given a projection, return the minimal z_source
     fails if it can't produce a supercritical lens w. z_source<z_source_max and 
     Sigma(theta_min)>Sigma_crit
+    -> also return a function to verify if, given a min theta_E and max z_source, the
+    galaxy is supercritical
     """   
     
     # compute surface density within minimum theta_E 
@@ -198,9 +221,21 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     # add plot Sigma_encl vs theta
     Sigma_crit_min   = SigCrit(z_lens=Gal.z,z_source=z_source_max,cosmo=Gal.cosmo)
     r,Sigma_encl     = cells2SigRad(kw_2Ddens)
+    
     arcXkpc = Gal.cosmo.arcsec_per_kpc_proper(Gal.z)
     theta = r*arcXkpc
     Sigma_encl_arc = Sigma_encl/(arcXkpc**2)
+
+    
+    # intepolate it
+    _interpSigEncArc2   = interp1d(theta,Sigma_encl_arc)
+    # define it such that it preserves the units
+    def interpSigEncArc2(thetaE):
+        ensure_unit(thetaE,u.arcsec)
+        return _interpSigEncArc2(thetaE)*Sigma_encl_arc.unit
+    # create a function to verify that the given lens is is indeed a lens
+    verify_lens  = create_verify_lens_fnc(interpSigEncArc2)
+    
     Sigma_crit_min_arc = Sigma_crit_min/(arcXkpc**2)
     #plt.close()
     fig,ax = plt.subplots(1)
@@ -220,15 +255,51 @@ def get_min_z_source(Gal,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,save
     ax.set_title(r"$\Sigma_{encl}$")
     ax.legend()
 
-    # define the z_source_min:        
-    z_source_min = _get_min_z_source(cosmo=Gal.cosmo,z_lens=Gal.z,
-                                    thresh_dens=dens_at_thetamin,
-                                    z_source_max=z_source_max,verbose=verbose)
-    if z_source_min==0:
-        raise ProjectionError("This projection for this galaxy does not lead to a supercritical lens. Rerun trying different projection")
+    # Obtain the z_source_min:        
+    ##########################
+    # to be considered a lens, the dens. threshold has to be larger than the critical density 
 
-    kw_zs_min = {"z_source_min":z_source_min,"fig_Sig":fig}
+    # convert it into a ratio of angular diameter distances Ds / Dds
+    thresh_DsDds = dens_at_thetamin*4*np.pi*const.G*Gal.cosmo.angular_diameter_distance(Gal.z)/(const.c**2) 
+
+    z_source_min = _get_min_z_source(cosmo=Gal.cosmo,z_lens=Gal.z,
+                                    thresh_DsDds=thresh_DsDds,
+                                    z_source_max=z_source_max,verbose=verbose)
+    """
+    if z_source_min==0:
+        # verify_lens_fnc have to be passed somehow
+        raise ProjectionError("This projection for this galaxy does not lead to a supercritical lens. Rerun trying different projection")
+    """
+    kw_zs_min = {"z_source_min":z_source_min,"fig_Sig":fig,"verify_lens":verify_lens}
     return kw_zs_min
+
+def create_verify_lens_fnc(interpSigEncArc2):
+    """
+    Create function to verify that the galaxy is supercritical given the chosen 
+    conditions: max z, min thetaE
+    """
+    def verify_lens(gal_class,min_thetaE=None,z_source_max=None):
+        z_lens = gal_class.z 
+        cosmo  = gal_class.cosmo 
+        if min_thetaE is None:
+            min_thetaE = gallens_class.min_thetaE
+        min_thetaE = ensure_unit(min_thetaE,u.arcsec)
+        if z_source_max is None:
+            z_source_max = gallens_class.z_source_max
+            
+        min_SigEnc   = interpSigEncArc2(min_thetaE)
+        Dd           = cosmo.angular_diameter_distance(z_lens)
+        thresh_DsDds = min_SigEnc*(4*np.pi*const.G*Dd)/(const.c**2)
+        ensure_unit(thresh_DsDds,u.dimensionless_unscaled)
+        
+        if thresh_DsDds>=DsDds(cosmo=cosmo,z_d=z_lens,z_s=z_source_max):
+             # can be a lens
+            z_range      = _get_z_source_range(z_lens,z_source_max,n=1000)
+            z_source_min = _get_min_z_source_thresh_DsDds(z_range,thresh_DsDds,cosmo=cosmo,z_d=z_lens)
+            return z_source_min
+        else:
+            return np.nan
+    return verify_lens
 
 def getDensAtRad(kw_2Ddens,rad):
     # get density within radius
@@ -238,36 +309,51 @@ def getDensAtRad(kw_2Ddens,rad):
     return Sigma_encl[i_r]
     
 
-def _get_min_z_source(cosmo,z_lens,thresh_dens,z_source_max,verbose=True):
+def  _get_min_z_source_thresh_DsDds(z_source_range,thresh_DsDds,cosmo,z_d):
+    DsDds_range  = np.array([DsDds(cosmo=cosmo,z_d=z_d,z_s=z_s) for z_s in z_source_range])
+    diff         = thresh_DsDds-DsDds_range
+    # the difference has to change sign at least in one point
+    if len(np.where(diff>=0)[0])==0 or len(np.where(diff<0)[0])==0:
+        print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
+        return np.nan
+    abs_diff     = np.abs(diff)
+    z_source_min = z_source_range[abs_diff.argmin()]
+    return z_source_min    
+
+def _get_z_source_range(z_lens,z_source_max,n=100,dz=0.01):
+    return np.linspace(z_lens+dz,z_source_max,n)
+
+def DsDds(cosmo,z_d,z_s):
+    Ds  = cosmo.angular_diameter_distance(z_s)
+    Dds = cosmo.angular_diameter_distance_z1z2(z_d,z_s)
+    return Ds/Dds
+
+def _get_min_z_source(cosmo,z_lens,thresh_DsDds,z_source_max,verbose=True):
     # the lens has to be supercritical
     # dens>Sigma_crit = (c^2/4PiG D_d(z_lens) ) D_s(z_source)/D_ds(z_lens,z_source)
     # -> D_s(z_source)/D_ds(z_lens,z_source) < 4PiG D_d(z_lens) *dens/c^2
     # D_s(z_source)/D_ds(z_lens,z_source) is not easy to compute analytically, but we can sample it
     if z_lens>z_source_max:
         raise ValueError("The galaxy redshift is higher than the maximum allowed source redshift")
-        #return 0 
 
-    # this is then the density threshold of this lens 
-    thresh_dens  = ensure_unit(thresh_dens,u.Msun/(u.kpc**2))
-    # to be considered a lens, this density has to be larger than the critical density 
-
-    # convert it into a ratio of angular diameter distances Ds / Dds
-    thresh_DsDds = thresh_dens*4*np.pi*const.G*cosmo.angular_diameter_distance(z_lens)/(const.c**2) 
-    thresh_DsDds = thresh_DsDds.to("").value # assert(max_DsDds.unit==u.dimensionless_unscaled) -> equivalent
-
-    min_DsDds = cosmo.angular_diameter_distance(z_source_max)/cosmo.angular_diameter_distance_z1z2(z_lens,z_source_max) # this is the minimum
-    min_DsDds = min_DsDds.to("").value # dimensionless
-
+    thresh_DsDds = ensure_unit(thresh_DsDds, u.dimensionless_unscaled)
+    thresh_DsDds = thresh_DsDds.to("").value
     # since DsDds is a very smooth function, we just need to find if and where these meet
-    z_source_range = np.linspace(z_lens+0.1,z_source_max,100) # it's a very smooth funct->
-    DsDds = np.array([cosmo.angular_diameter_distance(z_s).to("Mpc").value/cosmo.angular_diameter_distance_z1z2(z_lens,z_s).to("Mpc").value for z_s in z_source_range])
+    z_source_range = _get_z_source_range(z_lens,z_source_max)
+    DsDds_range    = np.array([DsDds(cosmo=cosmo,z_d=z_lens,z_s=z_s).value for z_s in z_source_range])
+
+        
+    min_DsDds = DsDds_range[-1]
+    # the minimum should correspond to the highest redshift source:
+    assert min_DsDds == np.min(DsDds_range)
+    
     if not min_DsDds<thresh_DsDds:
         # to do: deal with this kind of output
         if verbose:
             print("Warning: the minimum z_source needed to have a lens is higher than the maximum allowed z_source")
             plt.close()
             fig_dsdds,ax = plt.subplots()
-            ax.plot(z_source_range,DsDds,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
+            ax.plot(z_source_range,DsDds_range,ls="-",c="k",label=r"D$_{\text{s}}$/D$_{\text{ds}}$(z$_{source}$)")
             ax.set_xlabel(r"z$_{\text{source}}$")
             ax.axhline(thresh_DsDds,ls="--",c="r",label=r"thr(dens)*4$\pi$*G*$D_{\text{l}}$/c$^2$="+str( short_SciNot(thresh_DsDds)))
             ax.set_title("Comparison between Distance ratio and threshold density")
@@ -277,11 +363,9 @@ def _get_min_z_source(cosmo,z_lens,thresh_dens,z_source_max,verbose=True):
             plt.close(fig_dsdds)
             print("threshold density",short_SciNot(thresh_dens.value))
             print(f"Saved {name}")
-        return 0
+        return np.nan
     else:
-        # Note: successful test means that the threshold density = Sigmacrit given z_source =z_source_min
-        minimise     = np.abs(DsDds-thresh_DsDds) 
-        z_source_min = z_source_range[np.argmin(minimise)]
+        z_source_min = _get_min_z_source_thresh_DsDds(z_source_range,thresh_DsDds,cosmo,z_d=z_lens)
         return z_source_min
     
 def get_MDfromAMRcells_PLL(AMR_cells):
@@ -299,19 +383,15 @@ def get_MDfromAMRcells_PLL(AMR_cells):
         pass
     MD_value  = np.max(density)
     return MD_coords,MD_value
-def get_rough_thetaE_PLL(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR.png",path=Path("tmp/"),fig_Sig=None):
-    # -> this should only be used for plotting
-    # the idea is simple:
-    # we want a very approximate idea of the theta_E of the galaxy
-    # to do that, we fit a SIS to its particle distribution 
-    # basically in 1D, assuming (wrong but we don't care) spherical symmetry
-    # then we scale that by the scale (default=2) and that is our aperture
+
+def get_rough_thetaE(kw_2Ddens,cosmo,z_lens,z_source,nm_sigmaplot="Sigma_AMR.png",path=Path("tmp/"),fig_Sig=None):
+    # approximate theta_E of the galaxy
 
     Dd      = cosmo.angular_diameter_distance(z_lens).to("Mpc")
     Ds      = cosmo.angular_diameter_distance(z_source).to("Mpc")
     Dds     = cosmo.angular_diameter_distance_z1z2(z_lens,z_source).to("Mpc") 
     kw_Ddds = {"Dd":Dd,"Dds":Dds,"Ds":Ds}
-    return theta_E_from_AMR_densitymap_PLL(kw_2Ddens=kw_2Ddens,nm_sigmaplot=nm_sigmaplot,path=path,fig_Sig=fig_Sig,**kw_Ddds)
+    return theta_E_from_AMR_densitymap(kw_2Ddens=kw_2Ddens,nm_sigmaplot=nm_sigmaplot,path=path,fig_Sig=fig_Sig,**kw_Ddds)
 
 def cells2SigRad(kw_2Ddens):    
     xc,yc = kw_2Ddens["MD_coords"] #kpc
@@ -357,7 +437,7 @@ def cells2SigRad(kw_2Ddens):
     Sigma_encl = cumulative_mass/cumulative_area
     return r_sorted,Sigma_encl
     
-def theta_E_from_AMR_densitymap_PLL(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigmaplot="Sigma.png",path=Path("tmp/")):
+def theta_E_from_AMR_densitymap(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigmaplot="Sigma.png",path=Path("tmp/")):
     # Critical density
     Sigma_crit = (const.c**2 / (4*np.pi*const.G) * (Ds/(Dd*Dds))).to("Msun/kpc^2")
     # Physical scale of 1 arcsec at Dd
