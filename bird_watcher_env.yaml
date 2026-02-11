@@ -20,6 +20,7 @@ dependencies:
   - tqdm
   - emcee
   - corner
+  - pandas # for tutorial
   - pip  
   - pip:
       - mgefit
