@@ -156,9 +156,9 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         savedir = Lens.savedir
     if pixel_num is None:
         pixel_num  = Lens.pixel_num # here in case I need to change it
-    if cutoff_rad is None:
-        cutoff_rad = get_iso_cutoff(Lens)
     if kw_res is None:
+        if cutoff_rad is None:
+            cutoff_rad = get_iso_cutoff(Lens)
         kw_res = fit_iso(Lens=Lens,map_type=map_type,
                          cutoff_rad=cutoff_rad,pixel_num=pixel_num,
                          reload=reload,verbose=verbose)
@@ -202,6 +202,8 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         ax.set_ylim([ymin,ymax])
         ax.set_xlabel("kpc")
         ax.set_ylabel("kpc")
+
+
     
     
     # overplot a few isophotes on the residual map
@@ -234,28 +236,60 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     
     geom    = kw_res["isofit"]["geom"]
 
-    plt.figure(figsize=(10, 5))
-    plt.figure(1)
+    fig = plt.figure(figsize=(12, 7))    
+    ax1 = fig.add_subplot(221)
+    ax1.errorbar(sma_kpc, 1-isolist.eps, yerr=isolist.ellip_err, fmt='o', markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('Axis Ratio []')
+    ax_twin = ax1.twiny() 
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
     
-    plt.subplot(221)
-    plt.errorbar(sma_kpc, 1-isolist.eps, yerr=isolist.ellip_err, fmt='o', markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('Axis Ratio')
+    ax1 = fig.add_subplot(222)
+    ax1.errorbar(sma_kpc, isolist.pa/np.pi*180., yerr=isolist.pa_err/np.pi* 80., fmt='o', markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('PA [deg]')
+    ax_twin = ax1.twiny() 
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
+
+    ax1 = fig.add_subplot(223)
+    ax1.errorbar(sma_kpc, (isolist.x0-geom.x0)*kpcPix, yerr=isolist.x0_err, fmt='o', markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('X0-Xcnt [kpc]')
+    ax_twin = ax1.twiny() 
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
+
     
-    plt.subplot(222)
-    plt.errorbar(sma_kpc, isolist.pa/np.pi*180., yerr=isolist.pa_err/np.pi* 80., fmt='o', markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('PA (deg)')
-    plt.subplot(223)
-    plt.errorbar(sma_kpc, (isolist.x0-geom.x0)*kpcPix, yerr=isolist.x0_err, fmt='o', markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('X0-Xcnt [kpc]')
-    
-    plt.subplot(224)
-    plt.errorbar(sma_kpc, (isolist.y0-geom.y0)*kpcPix, yerr=isolist.y0_err, fmt='o', markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('Y0-Ycnt [kpc]')
-    
+    ax1 = fig.add_subplot(224)
+    ax1.errorbar(sma_kpc, (isolist.y0-geom.y0)*kpcPix, yerr=isolist.y0_err, fmt='o', markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('Y0-Ycnt [kpc]')
+    ax_twin = ax1.twiny() 
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
+
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35, wspace=0.35)
     name_plot = f"{savedir}/{map_type}_prms1.png"
     print(f"Saving {name_plot}")
@@ -263,34 +297,66 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
     plt.savefig(name_plot)
     plt.close()
 
-    plt.figure(figsize=(10, 5))
-    plt.figure(1)
+    #plt.figure(figsize=(10, 5))
+    fig = plt.figure(figsize=(12, 7))    
     #limits = [0., 100., -0.1, 0.1]
     
-    plt.subplot(221)
+    ax1 = fig.add_subplot(221)
     #plt.axis(limits)
-    plt.errorbar(sma_kpc, isolist.a3, yerr=isolist.a3_err, fmt='o', markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('A3')
-    
-    plt.subplot(222)
+    ax1.errorbar(sma_kpc, isolist.a3, yerr=isolist.a3_err, fmt='o', markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('A3')
+    ax_twin = ax1.twiny()
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
+
+    ax1 = fig.add_subplot(222)
     #plt.axis(limits)
-    plt.errorbar(sma_kpc, isolist.b3, yerr=isolist.b3_err, fmt='o', markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('B3')
+    ax1.errorbar(sma_kpc, isolist.b3, yerr=isolist.b3_err, fmt='o', markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('B3')
+    ax_twin = ax1.twiny()
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
     
-    plt.subplot(223)
+    ax1 = fig.add_subplot(223)
     #plt.axis(limits)
-    plt.errorbar(sma_kpc, isolist.a4, yerr=isolist.a4_err, fmt='o', markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('A4')
-    
-    plt.subplot(224)
+    ax1.errorbar(sma_kpc, isolist.a4, yerr=isolist.a4_err, fmt='o', markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('A4')
+    ax_twin = ax1.twiny()     
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
+
+    ax1 = fig.add_subplot(224)
     #plt.axis(limits)
-    plt.errorbar(sma_kpc, isolist.b4, fmt='o', yerr=isolist.b4_err, markersize=4)
-    plt.xlabel('Semimajor axis [kpc]')
-    plt.ylabel('B4')
-    
+    ax1.errorbar(sma_kpc, isolist.b4, fmt='o', yerr=isolist.b4_err, markersize=4)
+    ax1.set_xlabel('Semimajor axis [kpc]')
+    ax1.set_ylabel('B4')
+    ax_twin = ax1.twiny()
+    ax_twin.set_xlim(ax1.get_xlim())
+    ticks_loc = ax1.get_xticks()
+    conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+    conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+    ax_twin.set_xticks(ticks_loc)
+    ax_twin.set_xticklabels(conv_ticks)
+    ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
+
     plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35, wspace=0.35)
     
     name_plot = f"{savedir}/{map_type}_prms2.png"
@@ -320,6 +386,16 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         ax.legend()
         ax.set_xlabel(r'log$_{10}$(Semimajor axis [kpc])')
         ax.set_ylabel(r'log$_{10}$('+map_nm+r'$)')
+
+        ax_twin = ax.twiny() 
+        ax_twin.set_xlim(ax.get_xlim())
+        ticks_loc = ax.get_xticks()
+        conv_ticks = ticks_loc*Lens.arcXkpc.value/Lens.thetaE.value #arcsec
+        conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+        ax_twin.set_xticks(ticks_loc)
+        ax_twin.set_xticklabels(conv_ticks)
+        ax_twin.set_xlabel(r'$\theta/\theta_E$ []')
+
         name_plot = f"{savedir}/{map_type}_map.png"
         print(f"Saving {name_plot}")
         plt.tight_layout()
@@ -336,6 +412,15 @@ def plot_isofit(Lens,map_type="kappa",savedir=None,cutoff_rad=None,pixel_num=Non
         plt.title(r"$\gamma$(r)")
         plt.xlabel(r"log$_{10}$r")
         plt.ylabel(r"$\gamma$(r)")
+        ax_twin = plt.twiny() 
+        ax_twin.set_xlim(plt.axes().get_xlim())
+        ticks_loc = plt.axes().get_xticks()
+        conv_ticks = ticks_loc + np.log10(Lens.arcXkpc.value/Lens.thetaE.value) 
+        conv_ticks = [np.round(cvt,2) for cvt in conv_ticks]
+        ax_twin.set_xticks(ticks_loc)
+        ax_twin.set_xticklabels(conv_ticks)
+        ax_twin.set_xlabel(r'$log_{10}(\theta/\theta_E$) []')
+
         plt.legend()
         namefig = f"{savedir}/gamma_r.png"
         print(f"Saving {namefig}")
