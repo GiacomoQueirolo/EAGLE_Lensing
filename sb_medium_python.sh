@@ -1,1 +1,0 @@
-../sb_medium_python.sh
