@@ -14,7 +14,7 @@ from particle_galaxy import PartGal
 from python_tools.tools import to_dimless
 from particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
 from generate_particle_lens import wrapper_get_rnd_lens,get_extents,LoadLens,LensPart
-from generate_particle_lens import pixel_num,z_source_max
+from generate_particle_lens import pixel_num,kw_prior_z_source_minimal
 
 if __name__ == "__main__":
 
@@ -29,7 +29,7 @@ if __name__ == "__main__":
                  M=None,Centre=None,
                  reload=True)
 
-    kw_add_lens = {"lens_model":["LOS"]
+    kw_add_lenses = {"lens_model_list":["LOS"],
                     "kwargs_lens":[]}
     # load first parameters from analosis, golden sample
     path = "/pbs/home/g/gqueirolo/analosis/analosis/results/datasets/golden_sample_input_kwargs.csv"
@@ -39,14 +39,15 @@ if __name__ == "__main__":
     'kappa_ds', 'gamma1_ds', 'gamma2_ds', 'omega_ds',
     'kappa_los', 'gamma1_los', 'gamma2_los', 'omega_los']
     los  = kw.loc[:, los_cols]
-    kw_los = los[0]
-    kw_add_lens["kwargs_lens"] = [kw_los]
+    list_los = los.to_dict('records')
+    kw_los = list_los[0]
+    kw_add_lenses["kwargs_lens"] = [kw_los]
     
     mod_LP = LensPart(Galaxy=Gal,
                       kwlens_part=kwlens_part_AS,
-                      z_source_max=z_source_max,
+                      kw_prior_z_source=kw_prior_z_source_minimal,
                       pixel_num=pixel_num,
-                      kw_additional_lenses=kw_add_lens,
+                      kw_add_lenses=kw_add_lenses,
                       reload=False,
                       savedir_sim="test_sim_lens_LOS")
     """

@@ -13,7 +13,7 @@ from particle_galaxy import PartGal
 from python_tools.tools import to_dimless
 from particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
 from generate_particle_lens import wrapper_get_rnd_lens,get_extents,LoadLens,LensPart
-from generate_particle_lens import pixel_num,z_source_max
+from generate_particle_lens import pixel_num,kw_prior_z_source_minimal
 
 if __name__ == "__main__":
 
@@ -28,7 +28,7 @@ if __name__ == "__main__":
                  M=None,Centre=None,
                  reload=False)
     mod_LP = LensPart(Galaxy=Gal,kwlens_part=kwlens_part_AS,
-                       z_source_max=z_source_max, 
+                       kw_prior_z_source=kw_prior_z_source_minimal, 
                        pixel_num=pixel_num,reload=False,savedir_sim="test_sim_lens_AMR")
     """
     mod_LP = LoadLens("/pbs/home/g/gqueirolo/EAGLE/sim_lens/RefL0025N0752/snap19_G12.0/test_sim_lens_AMR/Gn12SGn0_Npix200_PartAS.pkl")

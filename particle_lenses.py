@@ -70,19 +70,36 @@ def _build_kwargs_lens_PM(args):
 # Helper funct - create the kwargs_lens given the part. parameters, ie theta_E,x,y,(core if needed) 
 # and the lens_model
 #
-def get_lens_model_PM(thetaEs,samples):
+
+def add_lenses(kwargs_lens,lens_model_list,kw_add_lenses=None):
+    # add lenses models if present
+    # useful for LOS
+    if kw_add_lenses is not None:
+        add_kwl         = kw_add_lenses["kwargs_lens"]
+        add_lml         = kw_add_lenses["lens_model_list"]
+        lens_model_list = [*add_lml,*lens_model_list]
+        kwargs_lens     = [*add_kwl,*kwargs_lens]
+    return kwargs_lens,lens_model_list
+    
+def get_lens_model_PM(thetaEs,samples,kw_add_lenses=None):
     kwargs_lens_PM  = [_build_kwargs_lens_PM((thetaEs, samples[0],samples[1]))]
     lens_model_list = ["POINT_MASS_PARALL"]
+    kwargs_lens_PM,lens_model_list= add_lenses(kwargs_lens=kwargs_lens_PM,
+                                               lens_model_list=lens_model_list,
+                                               kw_add_lenses=kw_add_lenses)
     lens_model_PM   = LensModel(lens_model_list=lens_model_list)
     return kwargs_lens_PM,lens_model_PM 
 
-def get_lens_model_AS(theta_cAS,thetaEs,samples):
+def get_lens_model_AS(theta_cAS,thetaEs,samples,kw_add_lenses=None):
     try:
         len(theta_cAS)
     except TypeError:
         theta_cAS *= np.ones_like(thetaEs)
     kwargs_lens_AS = [_build_kwargs_lens_AS((thetaEs,theta_cAS, samples[0],samples[1]))]
     lens_model_list = ["ARSINH_PARALL"]
+    kwargs_lens_AS,lens_model_list= add_lenses(kwargs_lens=kwargs_lens_AS,
+                                               lens_model_list=lens_model_list,
+                                               kw_add_lenses=kw_add_lenses)
     lens_model_AS   = LensModel(lens_model_list=lens_model_list)
     return kwargs_lens_AS,lens_model_AS
     
@@ -136,11 +153,12 @@ def get_name_AS(kwargs_lens):
 #################
 
 #
-# Class wrapper for Particle Lens computation
+# Particle Lens computation class
 #
 class PMLens():
-    def __init__(self,kwargs_lens_part):
+    def __init__(self,kwargs_lens_part,kw_add_lenses=None):
         self.kwargs_lens = kwargs_lens_part
+        self.kw_add_lenses = kw_add_lenses 
         type_part = kwargs_lens_part["type"]
         self.name = type_part
         
@@ -158,7 +176,7 @@ class PMLens():
 
     
     def setup(self,Mod):
-        """Define cosmological parameters from the lens model
+        """Define cosmological parameters from the LensPart class
         """
         self.z_lens   = Mod.z_lens
         self.z_source = Mod.z_source
@@ -167,13 +185,17 @@ class PMLens():
     def get_lens_PART(self,samples,Ms):
         """From the sample of particles (position and masses) return their model and parameters
         in lenstronomy format.
+        If present, consider additional lenses profiles
         """
         theta_pref = self.thetaE_prefact(z_lens=self.z_lens,z_source=self.z_source,cosmo=self.cosmo)
         thetaEs    = self.thetaE(M=Ms,theta_pref = theta_pref)
         kw_lns_mod = {}
         if self.name =="ARSINH"  or self.name =="AS":
             kw_lns_mod = {"theta_cAS":self.kwargs_lens["theta_cAS"]}
-        kwargs_lens_PART,lens_model_PART = self.get_lens_model(thetaEs=thetaEs,samples=samples,**kw_lns_mod)
+        kwargs_lens_PART,lens_model_PART = self.get_lens_model(thetaEs=thetaEs,
+                                                               samples=samples,
+                                                               kw_add_lenses=self.kw_add_lenses,
+                                                               **kw_lns_mod)
         return kwargs_lens_PART,lens_model_PART
 
     

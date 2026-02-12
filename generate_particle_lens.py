@@ -27,6 +27,8 @@ from particle_galaxy import get_rnd_PG,Gal2kwMXYZ,LoadGal
 # particle lens class and params.
 from particle_lenses import PMLens 
 from particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
+# likelihood class
+from likelihood import Likelihood
 # project galaxy along various axis
 from project_gal_AMR import get_2Dkappa_map,ProjGal,projection_main_AMR
 from project_gal_AMR import Gal2kw_samples,ProjectionError
@@ -102,14 +104,14 @@ kwargs_band_sim = {'read_noise': 0, # no RN noise
  'magnitude_zero_point': 30,  # very deep 
  'num_exposures': 1,          # standard HST n exp.
  'psf_type': 'NONE'}          # "infinite" psf resolution 
-
+kw_prior_z_source_minimal = {"z_source_max":z_source_max}
 class LensPart(): 
     def __init__(self,
                  Galaxy,
                  kwlens_part, # if PM or AS, and if so size of the core
                  pixel_num=pixel_num, # sim prms 
-                 kw_additional_lenses=None, # additional lenses (e.g. LOS)
-                 z_source_max  = z_source_max,     # for z_source sampling
+                 kw_add_lenses=None, # additional lenses (e.g. LOS)
+                 kw_prior_z_source = kw_prior_z_source_minimal, # could likelihood of z_source
                  min_thetaE = min_thetaE,
                  source_model_list=source_model_list, # this might not be the most efficient way to do it..
                  kwargs_band_sim=kwargs_band_sim,
@@ -124,6 +126,7 @@ class LensPart():
         self.Gal           = Galaxy
         self.Gal_path      = Galaxy.pkl_path
         self.Gal_name      = Galaxy.Name # must be stored
+        z_source_max       = kw_prior_z_source["z_source_max"]
         # if reload, check if Gal is a lens - if it isn't, raise error
         if reload:
             if not self.Gal.is_lens(z_source_max=z_source_max,
@@ -139,9 +142,8 @@ class LensPart():
         # lensing params
         self.pixel_num     = pixel_num      
         self.kwlens_part   = kwlens_part
-        self.PMLens        = PMLens(kwlens_part)
-        # additional lenses
-        self.kw_additional_lenses = kw_additional_lenses
+        self.kw_add_lenses = kw_add_lenses
+        self.PMLens        = PMLens(kwlens_part,kw_add_lenses=kw_add_lenses)
         # cosmo params
         self.z_lens        = self.Gal.z
         self.cosmo         = self.Gal.cosmo
@@ -149,6 +151,8 @@ class LensPart():
 
         # criteria for supercriticality of the lens
         self.z_source_max  = z_source_max
+        self.kw_like_zs    = kw_prior2like_zs(kw_prior_z_source=kw_prior_z_source,
+                                              z_lens=self.z_lens)
         self.min_thetaE    = ensure_unit(min_thetaE,u.arcsec) #arcsec
         
         # observational params
@@ -171,6 +175,8 @@ class LensPart():
             self.PMLens._identity(),
             self.pixel_num,
             self.z_source_max,
+            self.kwlens_part,
+            self.kw_add_lenses
             )
     
     def __hash__(self):
@@ -246,7 +252,7 @@ class LensPart():
         self.cosmo = Galaxy.cosmo
         
         # re-define PMLens
-        self.PMLens = PMLens(self.kwlens_part)
+        self.PMLens = PMLens(self.kwlens_part,kw_add_lenses=self.kw_add_lenses)
         self.PMLens.setup(self)
         
         # Rebuild lens model if missing
@@ -409,11 +415,6 @@ class LensPart():
         if present, add the additional lenses components
         """
         self.setup_particle_lenses()
-        if self.kw_additional_lenses:
-            kw_add_lens = self.kw_additional_lenses["kwargs_lens"]
-            lm_add_lens = self.kw_additional_lenses["lens_model"]
-            self.lens_model = [lm_add_lens,*self.lens_model]
-            self.kwargs_lens = [kw_add_lens,*self.kwargs_lens]
         return 0
     # the following is meant to be rerun every time we load the class to save space
     # -> computationally not intense 
@@ -432,8 +433,21 @@ class LensPart():
         
     def sample_z_source(self,z_source_min,z_source_max):
         # this is here to allow modularity 
-        # for now a simple uniform sample, but we could define something more fancy
-        z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
+        if self.kw_like_zs is None:
+            # simple uniform sample btw the ranges
+            z_source = np.random.uniform(z_source_min,z_source_max,1)[0]
+        elif "fixed" in self.kw_like_zs.keys():
+            # if fixed, we don't sample it
+            z_source = self.kw_like_zs["fixed"]
+            # ensure it is still acceptable
+            assert z_source>=z_source_min and z_source<z_source_max
+        else:
+            # else we follow the given likelihood
+            Lkl_source = Likelihood(var_range=[[z_source_min,z_source_max]],
+                                    kw_like = self.kw_like_zs)
+            # the following still has shape = n_walkers
+            z_source_list = Lkl_source.sample(n_samples=1,progress=False)
+            z_source      = np.random.choice(z_source_list)
         return z_source
         
     def get_lensed_image(self,imageModel=None,sourceModel=None,kwargs_source=None,\
@@ -908,6 +922,32 @@ def fit_xy_spline(x, y,
 # helper funct
 #
 
+def kw_prior2like_zs(kw_prior_z_source,z_lens):
+    """
+    Convert kw_prior_z_source into the kw_like 
+    needed for the Likelihood class for the z_source sampling
+    if kw_prior_z_source does not have the required function, returns None
+    if kw_prior_z_source had "z_source_fixed", fix the z_source
+    """
+    kw_like_zs = None
+    prior_keys = kw_prior_z_source.keys()
+    if "f_lkl_z_source" in prior_keys and "fixed_z_source" in prior_keys:
+        raise RuntimeError("Either sample z_source or fix it")
+    if "f_lkl_z_source" in prior_keys:
+        kw_like_zs = {}
+        # wrapper funct. to fix the z_lens
+        def like_func_zs(z_source,*args):
+            f_lkl_pr = kw_prior_z_source["f_lkl_z_source"]
+            return f_lkl_pr(z_source=z_source,z_lens=z_lens,*args)
+        kw_like_zs["like_func"] = like_func_zs
+        kw_like_zs["like_prms"] = kw_prior_z_source.get("prms_lkl_z_source",[]) 
+        return kw_like_zs
+    elif "fixed_z_source" in prior_keys:
+        def lkl(zs,*args):
+            return 0 
+        kw_like_zs = {"fixed":[kw_prior_z_source["fixed_z_source"]]}
+    return kw_like_zs
+        
 
 # we override the standard loading function to recompute some large dataset that
 # are deleted to save space
@@ -968,7 +1008,7 @@ def wrapper_get_rnd_lens(reload=True,
     """
     
     default_kw_lenspart={"kwlens_part":kwlens_part_AS,
-                     "z_source_max":z_source_max,
+                     "kw_prior_z_source":kw_prior_z_source_minimal,
                      "kwargs_band_sim":kwargs_band_sim,
                      "pixel_num":pixel_num,
                      "reload":reload,
