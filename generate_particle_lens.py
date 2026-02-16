@@ -144,6 +144,7 @@ class LensPart():
         self.kwlens_part   = kwlens_part
         self.kw_add_lenses = kw_add_lenses
         self.PMLens        = PMLens(kwlens_part,kw_add_lenses=kw_add_lenses)
+        self.PMLens_name   = self.PMLens.name
         # cosmo params
         self.z_lens        = self.Gal.z
         self.cosmo         = self.Gal.cosmo
@@ -281,7 +282,7 @@ class LensPart():
     @property
     def name(self):
         # define name and path of savefile
-        return f"{self.Gal_name}_Npix{self.pixel_num}_Part{self.PMLens.name}"
+        return f"{self.Gal_name}_Npix{self.pixel_num}_Part{self.PMLens_name}"
     @property
     def pkl_path(self):
         return self.savedir/f"{self.name}.pkl"
@@ -450,7 +451,9 @@ class LensPart():
             z_source      = np.random.choice(z_source_list)
         return z_source
         
-    def get_lensed_image(self,imageModel=None,sourceModel=None,kwargs_source=None,\
+    def get_lensed_image(self,imageModel=None,
+                         sourceModel=None,kwargs_source=None,\
+                         alpha_map=None, # can input directly the alpha map
                          unconvolved=True):
         self.unpack()
         if sourceModel is None:
@@ -460,7 +463,7 @@ class LensPart():
         if imageModel is None:
             imageModel   = self.imageModel
         
-        x_source_plane,y_source_plane = self.get_xy_source_plane()
+        x_source_plane,y_source_plane = self.get_xy_source_plane(alpha_map=alpha_map)
         kwargs_source_list = [kwargs_source]
         source_light = sourceModel.surface_brightness(x_source_plane, y_source_plane, kwargs_source_list, k=None)
         if not np.abs(imageModel.Data.pixel_width-self.deltaPix.value)<1e-10:
@@ -495,13 +498,16 @@ class LensPart():
             self.update_source_position(ra_source,dec_source)
         return ra_source,dec_source
 
-    def get_xy_source_plane(self):
+    def get_xy_source_plane(self,alpha_map=None):
         """Map the x,y grid into the source plane
         (used to fit the light of the source to the image)
         """
         RA,DEC       = self.get_RADEC()
-        # if not already, compute alpha_map
-        alpha_x,alpha_y = self.alpha_map        
+        # if not given as input, reads the computed deflection map
+        if alpha_map is None:
+            # if not already, compute alpha_map
+            alpha_map = self.alpha_map
+        alpha_x,alpha_y = alpha_map        
         x_source_plane, y_source_plane = RA-alpha_x,DEC-alpha_y
         # the coords have to be given as flat
         x_source_plane = util.image2array(x_source_plane)
@@ -927,7 +933,7 @@ def kw_prior2like_zs(kw_prior_z_source,z_lens):
     Convert kw_prior_z_source into the kw_like 
     needed for the Likelihood class for the z_source sampling
     if kw_prior_z_source does not have the required function, returns None
-    if kw_prior_z_source had "z_source_fixed", fix the z_source
+    if kw_prior_z_source had "fixed_z_source", fix the z_source
     """
     kw_like_zs = None
     prior_keys = kw_prior_z_source.keys()
@@ -945,7 +951,7 @@ def kw_prior2like_zs(kw_prior_z_source,z_lens):
     elif "fixed_z_source" in prior_keys:
         def lkl(zs,*args):
             return 0 
-        kw_like_zs = {"fixed":[kw_prior_z_source["fixed_z_source"]]}
+        kw_like_zs = {"fixed":kw_prior_z_source["fixed_z_source"]}
     return kw_like_zs
         
 
