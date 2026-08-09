@@ -1,6 +1,7 @@
 # extract from a given simulation suite a set of plausible lenses
 # and select randomly one of these
 import os
+import gc
 import numpy as np
 from pathlib import Path
 
@@ -259,6 +260,9 @@ def get_gal_candidates(snap,
     swift_dataset = SWIFTDataset(soap_catalogue_file)
     selection_criteria = swift_dataset.bound_subhalo
     scale_factor       = swift_dataset.metadata.a
+    # free memory
+    del swift_dataset
+    gc.collect()
     if verbose:
         print(f"As selection criteria taking {selection_criteria.group_name}, ie {selection_criteria.group}")
     # We have to define based on what we select - or if we want other criteria
@@ -377,7 +381,6 @@ def get_all_kw_gal(sim=std_sim,
     """
     min_z = float(min_z)
     max_z = float(max_z)
-
     all_snap = get_all_snap(sim=sim,
                             subsim=subsim,
                             max_z=max_z,

@@ -1,4 +1,4 @@
-# Copy from modelling_severals, now we ACTUALLY simulate addition of LOS AND model for it
+# Copy from modelling_severals, now we fit for LOS shear instead of external shear
 import os
 import argparse
 import numpy as np
@@ -26,11 +26,11 @@ from nazgul.plot_PL import plot_kappamap
 from nazgul.stat_lenses import get_all_gallens
 
 from nazgul.lens_part_LOS import get_kw_los
-from nazgul.pathfinder import get_sim_dir
+from nazgul.pathfinder import get_sim_dir,tmp_dir
 
-lens_model_list   = ['EPL','LOS_MINIMAL']
+lens_model_list   = ['EPL',"LOS_MINIMAL"]
 source_model_list = ["SERSIC"]
-res_dir_base      = Path("./tmp/models/allLOS/")
+res_dir_base      = tmp_dir/"models/fitLOS/"
 
 def _get_model_res_dir(lens,res_dir=res_dir_base):
     res_dir = Path(f"{res_dir}/snap_{lens.gallens.Gal.snap}_{lens.name}")
@@ -43,8 +43,6 @@ def get_link_lens_path(lens,res_dir=res_dir_base):
 
 def setup_lens(lens,res_dir=res_dir_base):
     lens.model_res_dir = _get_model_res_dir(lens,res_dir=res_dir)
-    lens.setup_lenses(kwargs_add_lenses=lens.kwargs_add_lenses)
-    lens.gallens
     lens.image_sim = lens.get_lensed_image(unconvolved=False)
     mkdir(lens.model_res_dir)
     
@@ -288,18 +286,18 @@ if __name__=="__main__":
     else:
         raise RuntimeError("Give a valid run_type or implement it your own")
 
-    lenses2skip = ["Sub_Gn22SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj1","Sub_Gn3SGn0_Npix200_PartAS_Prj2"]
+    lenses2skip = [] # ["Sub_Gn22SGn0_Npix200_PartAS_Prj2"]
     #["Sub_Gn3SGn0_Npix200_PartAS_Prj1","Sub_Gn22SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj2"]
     gal_lenses  = get_lenses2model(skip_lenses=lenses2skip)
     for gal_lens in gal_lenses: 
         print("Loading lens "+gal_lens.name+"\n")
-        print("Adding LOS effects")
+        """print("Adding LOS effects")
         kw_los = get_kw_los()
         kw_add_lenses = {"lens_model_list":["LOS"],
                         "kwargs_lens":[kw_los]}
         lens = LensSystem.from_GalLens(gal_lens,kwargs_add_lenses=kw_add_lenses)
-        
-        #lens = LensSystem.from_GalLens(gal_lens)
+        """
+        lens = LensSystem.from_GalLens(gal_lens)
         """
         if lens.gallens.thetaE.value<min_thetaE:
             raise RuntimeError(f"Ensure that the thetaE of the input lens is larger than min_thetaE: {lens.gallens.thetaE.value}<{min_thetaE}")
@@ -348,8 +346,7 @@ if __name__=="__main__":
                     "kwargs_constraints":  kwargs_constraints, 
                     "kwargs_likelihood":   kwargs_likelihood, 
                     "kwargs_params":       kwargs_params,
-                    "fitting_kwargs_list": fitting_kwargs_list,
-                    "kw_add_lenses":       kw_add_lenses
+                    "fitting_kwargs_list": fitting_kwargs_list
                    }
         nm_input = f"{lens.model_res_dir}/kw_input.dll"
         with open(nm_input,"wb") as f:

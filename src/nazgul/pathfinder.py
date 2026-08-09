@@ -25,6 +25,10 @@ std_data_dir = path_nazgul/"RingBearer"
 tmp_dir = path_nazgul/"tmp"
 mkdir(tmp_dir)
 
+# result directory
+results_dir = path_nazgul/"results"
+mkdir(results_dir)
+
 std_simsuite_dir = std_data_dir/std_simsuite # which simulation suite
 std_sim_dir      = std_simsuite_dir/std_sim  # which simulation
 
@@ -90,7 +94,8 @@ def get_part_dir(snap=None,sim=std_sim,subsim=None,simsuite=std_simsuite,data_di
 # After this it becomes sim dependent -> refer to the translator
 from nazgul.Translator.pathfinder import translate_galname
 
-def get_gal_maindir(kw_gal,snap,sim=std_sim,subsim=None,simsuite=std_simsuite,data_dir=std_data_dir):
+def get_gal_maindir(kw_gal,snap,sim=std_sim,subsim=None,
+                    simsuite=std_simsuite,data_dir=std_data_dir):
     """
     Where all galaxy results are stored
     """

@@ -1,21 +1,19 @@
 """Plotting functions for the Particle Lenses
 """
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.stats import sigma_clip
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from nazgul.pathfinder import tmp_dir
 from python_tools.fwhm import get_fwhm
 
 
-def _plot_caustics(LPClass,
-                   kwargs_lens,
+def _plot_caustics(kw_crit,
                    kw_extents=None,
-                   fast_caustic = True,
-                   savename="test_caustics.png"):
-    if kw_extents is None:
-        kw_extents = LPClass.kw_extents 
-    xmin,xmax,ymin,ymax = kw_extents["extent_arcsec"]
-    kw_crit             = LPClass.critical_curve_caustics
+                   savename=tmp_dir/"test_caustics.png"):
+ 
     cl_rad_x,cl_rad_y   = kw_crit["critical_lines"]["radial"]
     cc_rad_x,cc_rad_y   = kw_crit["caustics"]["radial"]
     cl_tan_x,cl_tan_y   = kw_crit["critical_lines"]["tangential"]
@@ -27,10 +25,10 @@ def _plot_caustics(LPClass,
     ax.scatter(cc_tan_x,cc_tan_y,c="r",marker=".",label="Tangential Caustics")
     ax.scatter(cl_rad_x,cl_rad_y,c="cyan",marker=".",label="Radial Crit. Curve")
     ax.scatter(cl_tan_x,cl_tan_y,c="darkorange",marker=".",label="Tangential Crit. Curve")
-    # not used anymore
-    #ax.scatter(*cent_caust_tan,c="k",marker="x",label="Tang. Center Caustic")
-    ax.set_xlim(xmin,xmax)
-    ax.set_ylim(ymin,ymax)
+    if kw_extents:
+        xmin,xmax,ymin,ymax = kw_extents["extent_arcsec"]
+        ax.set_xlim(xmin,xmax)
+        ax.set_ylim(ymin,ymax)
     plt.gca().set_aspect('equal')
     ax.set_xlabel("RA ['']")
     ax.set_ylabel("DEC ['']")
@@ -39,18 +37,26 @@ def _plot_caustics(LPClass,
     plt.tight_layout()
     print(f"Saving {savename}") 
     plt.savefig(savename)
-    plt.close()
+    plt.close(fig)
     
-def plot_caustics(Model,fast_caustic = True,savename="test_caustics.png",kw_extents=None):
-    return _plot_caustics(Model,Model.kwargs_lens,
-                          fast_caustic=fast_caustic,savename=savename,kw_extents=kw_extents)
+def plot_caustics(Model,savename=tmp_dir/"test_caustics.png",kw_extents=None):
+    if kw_extents is None:
+        kw_extents = Model.gallens.kw_extents
+    kw_crit = LPClass.get_kw_critical_curve_caustics()
+    return _plot_caustics(kw_crit,savename=savename,kw_extents=kw_extents)
 
 
-def plot_kappamap(kappa1,extent_kpc,title1="",savename="kappa.png",cmap="hot",label_clb=r'$\kappa$'):
+def plot_kappamap(kappa_map,extent_kpc,title1="",savename="kappa.png",cmap="hot",label_clb=r'$\kappa$',
+                  to_sigma_clip=True,sigma=10):
+    if to_sigma_clip:
+        warnings.warn("Sigma clipping kappa map")
+        sgc = sigma_clip(kappa_map,sigma=sigma)        
+        msk_sgc = np.invert(sgc.mask)
+        kappa_map *= msk_sgc
     fig,axes = plt.subplots(2,figsize=(8,16))
 
     ax  = axes[0]
-    im0 = ax.imshow(kappa1,origin="lower",extent=extent_kpc,cmap=cmap)
+    im0 = ax.imshow(kappa_map,origin="lower",extent=extent_kpc,cmap=cmap)
     ax.set_xlabel("X [kpc]")
     ax.set_ylabel("Y [kpc]")
     ax.set_title(title1) 
@@ -60,7 +66,7 @@ def plot_kappamap(kappa1,extent_kpc,title1="",savename="kappa.png",cmap="hot",la
 
 
     # take advantage of the circular simmetry and obtain the projection
-    k1_proj = kappa1[int(len(kappa1)/2)]
+    k1_proj = kappa_map[int(len(kappa_map)/2)]
     x = np.linspace(extent_kpc[0],extent_kpc[1],len(k1_proj))
     _xcnt = np.median(x)
     ax = axes[1]

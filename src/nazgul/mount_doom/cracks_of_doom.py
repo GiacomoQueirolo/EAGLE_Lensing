@@ -5,6 +5,7 @@ General script for helper functions used in the generation of lenses
 import dill
 import warnings
 import numpy as np
+from copy import copy
 from pathlib import Path
 from functools import cached_property 
 
@@ -22,7 +23,7 @@ from python_tools.tools import mkdir,to_dimless,ensure_unit,convert_error_to_war
 # general path
 from nazgul.pathfinder import path_nazgul, std_data_dir
 
-def _resolve_gal_path(stored_path):
+def _resolve_gal_path(stored_path,data_dir=std_data_dir):
     """Translate a stored Gal_path to an absolute path on this machine.
 
     Handles three cases:
@@ -38,7 +39,7 @@ def _resolve_gal_path(stored_path):
         return path_nazgul / p.relative_to(path_nazgul)
     except ValueError:
         parts = p.parts
-        data_root = std_data_dir.name
+        data_root = data_dir.name
         for i, part in enumerate(parts):
             if part == data_root:
                 return path_nazgul / Path(*parts[i:])
@@ -85,12 +86,27 @@ kwargs_sersic_ellipse_basic = {'R_sersic': .1, 'n_sersic': 3,
                             'center_y': 0, 
                             'e1': 0.0, 
                             'e2': 0.0}
-kwargs_sersic_ellipse     = {'amp': 4000.}|kwargs_sersic_ellipse_basic
-kwargs_sersic_ellipse_mag = {'magnitude':25.}|kwargs_sersic_ellipse_basic
-kwargs_source_default     = kwargs_sersic_ellipse_mag
+kwargs_sersic_ellipse         = {'amp': 100.}|kwargs_sersic_ellipse_basic
+kwargs_sersic_ellipse_mag     = {'magnitude':24.}|kwargs_sersic_ellipse_basic
+kwargs_sersic_ellipse_abs_mag = {'abs_magnitude':-21}|kwargs_sersic_ellipse_basic
+
+kwargs_source_default     = kwargs_sersic_ellipse_abs_mag
 source_model_list         = ['SERSIC_ELLIPSE']
 
-def get_kwargs_sourceSim(Sim,kwargs_source=kwargs_source_default):
+def get_kwargs_sourceSim(Sim,kwargs_source=None,lens=None):
+    if kwargs_source is None:
+        if lens is None:
+            kwargs_source = kwargs_source_default
+        else:
+            kwargs_source = lens.kwargs_source_def
+    if "abs_magnitude" in kwargs_source.keys():
+        # convert absolute magnitude in apparent
+        Mag = kwargs_source["abs_magnitude"]
+        dL  = lens.cosmo.luminosity_distance(lens.gallens.z_source)
+        m = Mag + 5*np.log10(dL.to("pc").value/10)
+        del kwargs_source["abs_magnitude"]
+        kwargs_source["magnitude"] = m
+        
     if "magnitude" in kwargs_source.keys():
         kwargs_source_list       = [kwargs_source]
         # the following only depends on -kwargs_source_params, -magnitude_0_point -source_model_list
@@ -98,29 +114,28 @@ def get_kwargs_sourceSim(Sim,kwargs_source=kwargs_source_default):
         kwargs_source            = kwargs_source_list[0]
     return kwargs_source
 
-def get_dataclasses(Sim,kwargs_source=kwargs_source_default):
-        print("Pixel_num: ",  Sim.numpix)
-        print("DeltaPix: ",   np.round(Sim.pixel_scale,3))
-        data_class         = Sim.data_class
-        psf_class          = Sim.psf_class
-        kwargs_numerics    = {'supersampling_factor': 1, 'supersampling_convolution': False}
-        # Source Params
-        source_model_class = Sim.source_model_class
-        kwargs_source      = get_kwargs_sourceSim(Sim,kwargs_source=kwargs_source)
-        return data_class,psf_class,source_model_class,kwargs_numerics,kwargs_source
+def get_dataclasses(Sim):
+    print("Pixel_num: ",  Sim.numpix)
+    print("DeltaPix: ",   np.round(Sim.pixel_scale,3))
+    data_class         = Sim.data_class
+    psf_class          = Sim.psf_class
+    kwargs_numerics    = {'supersampling_factor': 1, 'supersampling_convolution': False}
+    source_model_class = Sim.source_model_class
+    return data_class,psf_class,source_model_class,kwargs_numerics
 
 ##########################
 # Model class for parts. #
 ##########################
-# kwargs of ultra-performing band for default simulated images -> quite arbitrary, possibly to improve
+# kwargs of ultra-performing band for default simulated images -> quite arbitrary, possibly to improve 
 kwargs_band_sim = {'read_noise': 0, # no RN noise
  'pixel_scale': None,               # to update depending on the lens
  'ccd_gain': 2.5,             # standard gain for HST
- 'exposure_time': 5400.0,     # standard exp time for HST
+ 'exposure_time': 5400.0,     # very long exp time for HST
  'sky_brightness': 35,        #"dark" sky
  'magnitude_zero_point': 30,  # very deep 
- 'num_exposures': 1,          # standard HST n exp.
+ 'num_exposures': 4,          # standard HST n exp.
  'psf_type': 'NONE'}          # "infinite" psf resolution 
+
 kw_prior_z_source_minimal = {"z_source_max":conf.z_source_max}
 kw_prior_z_source_stnd    = kw_prior_z_source_zl|kw_prior_z_source_minimal
                 
@@ -134,7 +149,7 @@ def MAD_mask(values,v0=0,sigma_scale=3):
     return mask
 
 # optimised w. CGPT:
-def fit_xy_spline(x, y,
+def fit_xy_spline_old(x, y,
     u=np.linspace(0, 1, 200),
     n_eval=150,           # points used for error estimation
     ):
@@ -202,6 +217,78 @@ def fit_xy_spline(x, y,
     xs, ys = splev(u, best_tck)
     return xs, ys
 
+# this obtained via Claude
+def fit_xy_spline(x, y,
+                  u=np.linspace(0, 1, 200),
+                  n_eval=150):   # ← expose this; set False for open arcs
+    
+    # --- order by arc length, not angle ---
+    # Start from the point with the most extreme position (e.g. leftmost)
+    # to get a consistent starting point
+    i_start = np.argmin(x)   # or use np.argmin(y), depending on geometry
+    
+    # reorder: rotate array so i_start is first
+    x_rot = np.roll(x, -i_start)
+    y_rot = np.roll(y, -i_start)
+    
+    # compute cumulative arc length as parameter
+    dx   = np.diff(x_rot)
+    dy   = np.diff(y_rot)
+    ds   = np.hypot(dx, dy)
+    # argsort by arc length from the starting point would require 
+    # nearest-neighbour chaining; simpler: use angular order only 
+    # if periodic, otherwise sort by x or use a greedy chain
+    xc    = np.median(x)
+    yc    = np.median(y)
+    for _ in range(3):
+        xc = np.average(x, weights=1/np.hypot(x - xc, y - yc))
+        yc = np.average(y, weights=1/np.hypot(x - xc, y - yc))
+
+    theta = np.arctan2(y - yc, x - xc)
+    order = np.argsort(theta)
+    x_ord = x[order]
+    y_ord = y[order]
+    x_ord = np.append(x_ord, x_ord[0])
+    y_ord = np.append(y_ord, y_ord[0])
+
+
+    n     = len(x_ord)
+    u_fit = np.linspace(0, 1, n)
+    idx   = np.linspace(0, n - 1, n_eval).astype(int)
+    u_sub = u_fit[idx]
+    x_sub = x_ord[idx]
+    y_sub = y_ord[idx]
+
+    # --- coarse search ---
+    s_vals = np.logspace(-5, -1, 12)
+    errs   = np.empty(len(s_vals))
+    for i, s in enumerate(s_vals):
+        tck, _ = splprep([x_ord, y_ord], s=s * n,
+                          per=True, quiet=True)
+        xs, ys = splev(u_sub, tck)
+        if i==0:
+            x_rough,y_rough = copy(xs),copy(ys)
+        errs[i] = np.sum(np.hypot(xs - x_sub, ys - y_sub))
+    if np.std(xs)<(np.std(x_ord)/1e5):
+        print("Rough fit seems to work best")
+        return x_rough,y_rough
+    # --- refine ---
+    i0 = np.argmin(errs)
+    lo = max(i0 - 1, 0)
+    hi = min(i0 + 1, len(s_vals) - 1)
+    s_refined = np.logspace(np.log10(s_vals[lo]), np.log10(s_vals[hi]), 10)
+    best_err, best_tck = np.inf, None
+    for s in s_refined:
+        tck, _ = splprep([x_ord, y_ord], s=s * n,
+                          per=True, quiet=True)
+        xs, ys = splev(u_sub, tck)
+
+        err    = np.sum(np.hypot(xs - x_sub, ys - y_sub))
+        if err < best_err:
+            best_err, best_tck = err, tck
+
+    xs, ys = splev(u, best_tck)
+    return xs, ys
 #
 # helper funct
 #
@@ -242,7 +329,10 @@ def LoadLens(LnsCl,verbose=True):
         # recompute deleted components
         LnsCl.unpack()
     return LnsCl
-    
+
+def store_lens(lens_class):
+    store_class(lens_class,path=lens_class.pkl_path,LoadClass=LoadLens)
+
 def ReadLens(aClass,verbose=True):
     return LoadLens(aClass.pkl_path,verbose=verbose)
 
@@ -335,8 +425,8 @@ class BasicLensPart(BasicGal):
 
         Lazily initializes the name if it has not been generated yet.
         """
+        #return f'Name:{self.name}\nHash{self._hash_b64}'
         return self.name
-    
     @property
     def name(self):
         # define name and path of savefile
@@ -398,7 +488,7 @@ class BasicLensPart(BasicGal):
         self.PartLens = PartLens(self.kwlens_part)
         
     def store(self):
-        store_class(self,path=self.pkl_path,LoadClass=LoadLens)
+        store_lens(self)
         
     @property
     def pkl_path(self):
@@ -465,17 +555,30 @@ class BasicLensPart(BasicGal):
             z_source      = np.random.choice(z_source_list)
         return z_source
     
-    def galaxy_projection(self,verbose=True,recompute=False,**kwargs_proj):       
-        list_att_gal_prj = ["z_source_min",
-                           "z_source",
-                           "MD_coords",
-                            "thetaE",
-                            "SigCrit"]
-        for att_gal_prj in list_att_gal_prj:
-            # we should not recompute it if it already has the solutions 
-            if not hasattr(self,att_gal_prj):
-                recompute = True
-                break
+    def galaxy_projection(self,verbose=True,recompute=False,**kwargs_proj):
+        """
+        Compute galaxy projection given a certain projection
+
+        If not reload, then automatically recompute
+        else, if not recompute, check if results are present - if not, recompute
+
+        At the end, if not recompute (ie results are already present) return, 
+        else recompute and return
+        """
+        if not self.reload:
+            recompute = True
+        else:
+            if not recompute:
+                list_att_gal_prj = ["z_source_min",
+                                   "z_source",
+                                   "MD_coords",
+                                    "thetaE",
+                                    "SigCrit"]
+                for att_gal_prj in list_att_gal_prj:
+                    # we should not recompute it if it already has the solutions 
+                    if not hasattr(self,att_gal_prj):
+                        recompute = True
+                        break
         if not recompute:
             return
         # Compute projection
@@ -484,7 +587,7 @@ class BasicLensPart(BasicGal):
                                         sample_z_source=self.sample_z_source,
                                         min_thetaE=self.min_thetaE,
                                         arcXkpc=self.arcXkpc,verbose=verbose,
-                                        reload=self.reload,
+                                        reload=not recompute,
                                        **kwargs_proj)
         # store results
         assert self.proj_index == kwres_proj_res["proj_index"]
@@ -501,3 +604,4 @@ class BasicLensPart(BasicGal):
         self.SigCrit       = SigCrit(cosmo=self.cosmo,
                                      z_lens=self.z_lens,
                                      z_source=self.z_source) # Msun/kpc^2
+        return 

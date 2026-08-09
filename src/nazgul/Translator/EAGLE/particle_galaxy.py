@@ -25,11 +25,11 @@ from python_tools.get_res import load_whatever
 from nazgul.Translator.EAGLE.get_gal_indexes import get_gals,get_catpath,get_query
 from nazgul.pathfinder import get_gal_dir,get_part_dir,std_sim,std_data_dir,path_nazgul
 from nazgul.Translator.EAGLE.fnct import _count_part,_mass_part
-from nazgul.Translator.EAGLE.fnct import get_z_snap,read_snap_header,get_nfiles
+from nazgul.Translator.EAGLE.fnct import get_snap,get_z_snap,read_snap_header,get_nfiles
 
-from nazgul.Translator.EAGLE import simsuite_name,part_type_list,check_part_type
+from nazgul.Translator.EAGLE import simsuite_name,simsuite_short_name,part_type_list,check_part_type
 from nazgul.Translator.translator import min_z,max_z,min_mass
-from nazgul.Translator.particle_galaxy import BasicPartGal,store_class,clip_coord
+from nazgul.Translator.particle_galaxy import BasicPartGal,store_class,clip_coord,compute_principal_axis_gen
 
 def gal_path2kwGal(gal_path):
     """From path extract the ALL required inputs for SimPartGal class
@@ -84,8 +84,8 @@ def get_rnd_gal_indexes(sim=std_sim,
 
 def get_vdisp(simpargal,**kwargs_query):
     snap,Gn,SGn = simpargal.snap,simpargal.Gn,simpargal.SGn
+    cat_path = get_catpath(**kwargs_query)
     try:
-        cat_path = get_catpath(**kwargs_query)
         query_out = load_whatever(cat_path)
         if not "SVD" in query_out.keys():
             if "Vdisp" in query_out.keys():
@@ -93,12 +93,16 @@ def get_vdisp(simpargal,**kwargs_query):
             else:
                 raise RuntimeError(f"Query results do not contain velocity dispersion. Keys:{query_out.keys()}")
     except Exception as e:
+        print("DEBUG",kwargs_query)
         print(f"Failed to recover previous cat due to Error: {e}\nRerunning query...")
         if "simsuite" in kwargs_query:
             del kwargs_query["simsuite"]
         myQuery = get_query(**kwargs_query)
         from nazgul.Translator.EAGLE.sql_connect import exec_query
         query_out = exec_query(myQuery)
+        with open(cat_path, "wb") as f:
+            dill.dump(query_out, f)
+        print(f"Saving {cat_path}")
 
     vdisp_stars_all = query_out["SVD"]*u.km/u.s
     list_Gn   = query_out["Gn"]
@@ -117,6 +121,15 @@ def get_kw_SimPartGal(kw_Gal,sim,simsuite,subsim,data_dir,z,snap,M,Centre,reload
 
 # index for particle types:
 # gas,dm, stars,bh : 0,1,4,5
+_kw_ind_type = {0:"gas",
+                1:"dm",
+                4:"stars",
+                5:"bh"}
+_kw_type_ind = {}
+for k in _kw_ind_type:
+    _kw_type_ind[_kw_ind_type[k]] = k
+
+    
 class SimPartGal(BasicPartGal):
     """Given the simulation, snap (or z) and galaxy numbers, set up a class
     with all the needed particle properties converted in physical units
@@ -126,8 +139,9 @@ class SimPartGal(BasicPartGal):
     _large_attributes_setup  = ["stars","gas","dm","bh"]
     _large_attributes_unpack = []
     # indexes of particles: gas,dm,stars,bh:
-    indexes = [0,1,4,5]
-    simsuite = simsuite_name
+    indexes       = [0,1,4,5]
+    simsuite      = simsuite_name
+    simsuite_code = simsuite_short_name
     def __init__(self, 
                  kw_Gal, # identity of the galaxy: Gn,SGn
                  sim=std_sim, 
@@ -141,9 +155,6 @@ class SimPartGal(BasicPartGal):
         self.z        = z
         self.Gn       = kw_Gal["Gn"]
         self.SGn      = kw_Gal["SGn"]
-        # n* of files per snapshot:
-        self.nfiles   = get_nfiles(sim)
-
         # Input Dir:
         self.part_dir = get_part_dir(snap,sim=sim,simsuite=self.simsuite,data_dir=data_dir)
         # Output dir:
@@ -164,11 +175,17 @@ class SimPartGal(BasicPartGal):
         # all paths are dealt as properties
         mkdir(self.gal_dir)        
         #self.run(reload=reload)
+        
     @property
     def name(self):
         #Note: this is unique only within the snap
         return f"Gn{self.Gn}SGn{self.SGn}"
-                
+        
+    @property
+    def nfiles(self):
+        # n* of files per snapshot:
+        return get_nfiles(self.sim)
+
     ### Class Structure ####
     ########################
     def _identity(self):
@@ -235,7 +252,7 @@ class SimPartGal(BasicPartGal):
         self._count_tot_part()
         self._mass_tot_part()
         self._verify_cnt()
-        self.compute_axis_ratio()
+        self.compute_principal_axes()
         self.store_gal(update=True)
 
     def upload_prev(self,verbose=True):
@@ -258,9 +275,12 @@ class SimPartGal(BasicPartGal):
             print("Loaded previosly computed galaxy")
         return
     
-    def compute_axis_ratio(self):
-        self.axis_ratio = compute_axis_ratio(self)
-        return self.axis_ratio
+    def compute_principal_axes(self):
+        self.initialise_parts()
+        if not hasattr(self,"principal_axes"):
+            self.principal_axes = compute_principal_axes(self)
+        return self.principal_axes
+        
     @property
     def xy_propr2comov(self):
         # useful to check Center of Mass
@@ -285,22 +305,36 @@ class SimPartGal(BasicPartGal):
         return read_snap_header(z=self.z,snap=self.snap,sim=self.sim)
 
     def initialise_parts(self):
+        part_loaded = True
         if not hasattr(self,"gas"):
+            part_loaded = False
             print("Loading particles...")
-            self.gas   = self.read_part(0)
-        if not hasattr(self,"dm"):
-            self.dm    = self.read_part(1)
-        if not hasattr(self,"stars"):
-            self.stars = self.read_part(4)
-        if not hasattr(self,"bh"):
-            self.bh    = self.read_part(5)
+        self._init_gas()
+        self._init_dm()
+        self._init_stars()
+        self._init_bh()
+        if not part_loaded:
+            print("... particles loaded")
+            part_loaded = True
         return 0
-        
+
+    def _init_gas(self):
+        if not hasattr(self,"gas"):
+            self.gas = self.read_part(_kw_type_ind["gas"])
+    def _init_dm(self):
+        if not hasattr(self,"dm"):
+            self.dm  = self.read_part(_kw_type_ind["dm"])
+    def _init_stars(self):
+        if not hasattr(self,"stars"):
+            self.stars = self.read_part(_kw_type_ind["stars"])
+    def _init_bh(self):
+        if not hasattr(self,"bh"):
+            self.bh = self.read_part(_kw_type_ind["bh"])
     ## Loading particles #
     ######################
     
     def _get_files(self):
-        files = [glob.glob(f"{self.part_dir}/snap_*.{i}.hdf5")[0] for i in range(self.nfiles)]
+        files = glob.glob(f"{self.part_dir}/snap_*.hdf5")
         if len(files) != self.nfiles:
             raise RuntimeError(f"Expected {self.nfiles} files, got {len(files)}")
         return files
@@ -325,7 +359,9 @@ class SimPartGal(BasicPartGal):
                     idx = np.sort(idx)
                     index_map[i] = idx
         if index_map == {}:
-            raise RuntimeError("Files do not contain any particle of this galaxy")
+            # This is possible (although odd) and could be real - if it's an error of the reading of files
+            # it will appear when we compare the mass with the exepcted mass. Thus we do not raise an error
+            warnings.warn(f"Files do not contain any particle of type {_kw_ind_type[itype]} for this galaxy: {self._identity()}")
         return index_map
         
     @property
@@ -355,7 +391,7 @@ class SimPartGal(BasicPartGal):
             output["mass"] = np.array([])
             if itype!=1:
                 output["smooth"] = np.array([])
-            warnings.warn(f"This galaxy do not contain particle of type {itype}")
+            warnings.warn(f"This galaxy do not contain particle of type {itype}, i.e. {_kw_ind_type[itype]}")
             return output
 
         for r in results:
@@ -373,7 +409,6 @@ class SimPartGal(BasicPartGal):
         output["mass"]   = np.hstack(output["mass"])
         if itype != 1:
             output["smooth"] = np.hstack(output["smooth"])
-            
         return output
         
     def _count_tot_part(self):
@@ -406,6 +441,7 @@ class SimPartGal(BasicPartGal):
         if not hasattr(self,"M_tot"):
             self.M_tot   =  self.M_gas+self.M_dm+self.M_stars +self.M_bh
         self.verbose_assert_almost_equal(float(self.M_tot)/float(self.M),1,decimal=3,msg="The summed and the total expected mass differ:")
+            
         return self.M_tot
                 
     def _verify_cnt(self):
@@ -413,30 +449,34 @@ class SimPartGal(BasicPartGal):
         """
         if not hasattr(self,"M_tot"):
             self._mass_tot_part()
-        # conv. in comov. coordinates
-        xy_dm  = self.dm["coords"]*self.xy_propr2comov
-        xy_gas = self.gas["coords"]*self.xy_propr2comov
-        xy_st  = self.stars["coords"]*self.xy_propr2comov
-        xy_bh  = self.bh["coords"]*self.xy_propr2comov
 
-        # m in comov coord
-        m_dm  = self.m_propr2comov*np.broadcast_to(self.dm["mass"],(3,self.N_dm)).T
-        m_gas = self.m_propr2comov*np.broadcast_to(self.gas["mass"],(3,self.N_gas)).T
-        m_st  = self.m_propr2comov*np.broadcast_to(self.stars["mass"],(3,self.N_stars)).T
-        m_bh  = self.m_propr2comov*np.broadcast_to(self.bh["mass"],(3,self.N_bh)).T
+        star_wcnt = _weighted_center(self.stars)
+        dm_wcnt   = _weighted_center(self.dm)
+        gas_wcnt  = _weighted_center(self.gas)
+        bh_wcnt   = _weighted_center(self.bh)
         
-        cm_dm   = np.sum(xy_dm*m_dm,axis=0)
-        cm_gs   = np.sum(xy_gas*m_gas,axis=0)
-        cm_st   = np.sum(xy_st*m_st,axis=0)
-        cm_bh   = np.sum(xy_bh*m_bh,axis=0)
+        center_actual = (
+            star_wcnt +
+            gas_wcnt  +
+            dm_wcnt   +
+            bh_wcnt ) / self.M_tot
 
-        cnt_m  = (cm_dm+cm_gs+cm_st+cm_bh)/(self.M*self.m_propr2comov)
- 
-        center_actual  = np.array(cnt_m)
-        center_desired = self.centre
-        #np.testing.assert_almost_equal(center_desired,center_desired,decimal=2)
-        self.verbose_assert_almost_equal(center_actual,center_desired,decimal=2,msg="The expected and measured CM centre differ:") 
+        center_actual  = np.array(center_actual)
+        center_desired = self.centre/self.xy_propr2comov
+        self.verbose_assert_almost_equal(center_actual,center_desired,decimal=3,msg="The expected and measured CM centre differ:") 
 
+def _weighted_center(part_type):
+    # note: not CoM!
+    if part_type["mass"].sum()!=0:
+        w_cnt = np.average(part_type["coords"], weights=part_type["mass"], axis=0)*np.sum(part_type["mass"]) 
+    else:
+        if len(part_type["coords"])!=0:
+            raise ValueError("Particle has 0 total mass but !=0 number of particles")
+        # there are no particle of this species in this gal
+        w_cnt = np.zeros(3)
+    return w_cnt
+
+        
 def _load_one_file(args):
     fl, indices, itype,boxsize,centre = args
     results = {}
@@ -463,7 +503,7 @@ def _load_one_file(args):
         coords = coords2scale * cgs_coords * (a ** aexp_coords) * (h ** hexp_coords)*u.cm.to(u.Mpc)
         # Periodic wrap coordinates around centre.
         # -> boxsize is given in cMpc/h, must correct for both scaling factors
-        boxsize           = boxsize* (a ** aexp_coords)*(h**hexp_coords)
+        boxsize           = boxsize*(a**aexp_coords)*(h**hexp_coords)
         centre            = centre*(a**aexp_coords) # given in comoving (but not 1/h)
         results['coords'] = np.mod(coords-centre+0.5*boxsize,boxsize)+centre-0.5*boxsize       
         # Mass
@@ -510,7 +550,10 @@ def _load_one_file(args):
 
             # DM has no smoothing scale
             results["smooth"] = None
-
+    print("DEBUG - particle_galaxy, _load_one_file")
+    # add this inside _load_one_file before return:
+    result_size = sum(v.nbytes for v in results.values() if hasattr(v,"nbytes"))
+    print(f"[WORKER] returning {result_size/1024**2:.1f} MB", flush=True)
     return results
 
 # this function is a wrapper for convenience - it takes the class itself as input
@@ -661,9 +704,6 @@ def Gal2MXYZ(Gal):
     Ys = np.concatenate([Ystar,Ygas,Ydm,Ybh])*u.Mpc.to("kpc")*u.kpc #kpc
     Zs = np.concatenate([Zstar,Zgas,Zdm,Zbh])*u.Mpc.to("kpc")*u.kpc #kpc
 
-    # clip particle outliers
-    Ms,Xs,Ys,Zs = clip_coord(Ms,Xs,Ys,Zs)
-    
     # center around the center of the galaxy
     # center of mass is given in Comoving coord 
     # see https://arxiv.org/pdf/1510.01320 D.23 
@@ -673,6 +713,10 @@ def Gal2MXYZ(Gal):
     Xs -= Cx
     Ys -= Cy
     Zs -= Cz
+    
+    # clip particle outliers AFTER recentering
+    Ms,Xs,Ys,Zs = clip_coord(Ms,Xs,Ys,Zs)
+    
     return Ms, Xs,Ys,Zs
 
 def Gal2MXYZ_part(Gal,part_type): 
@@ -688,9 +732,6 @@ def Gal2MXYZ_part(Gal,part_type):
     # Particle pos
     Xs,Ys,Zs =  np.transpose(part["coords"]) *u.Mpc.to("kpc")*u.kpc #kpc
 
-    # clip particle outliers
-    Ms,Xs,Ys,Zs = clip_coord(Ms,Xs,Ys,Zs)
-    
     # center around the center of the galaxy
     # center of mass is given in Comiving coord 
     # see https://arxiv.org/pdf/1510.01320 D.23 
@@ -700,46 +741,27 @@ def Gal2MXYZ_part(Gal,part_type):
     Xs -= Cx
     Ys -= Cy
     Zs -= Cz
-    return Ms, Xs,Ys,Zs
+    # clip particle outliers AFTER recentering
+    Ms,Xs,Ys,Zs = clip_coord(Ms,Xs,Ys,Zs)
     
-def compute_axis_ratio(Gal):
+    return Ms,Xs,Ys,Zs
+    
+def compute_principal_axes(Gal):
     """
-    Compute the principal axial ratio c/b used by Vyvere et al. '22 to discard elliptical or lenticular galaxies
+    Compute the principal axes from inertial tensor.
+    The ratio c/b is used by Vyvere et al. '22 to discard elliptical or lenticular galaxies
     """
-    Mstar = Gal.stars["mass"]*u.Msun
-    # Particle pos
-    Xstar,Ystar,Zstar =  np.transpose(Gal.stars["coords"])*u.Mpc.to("kpc")*u.kpc #kpc
-    # clip particle outliers
-    Ms,Xs,Ys,Zs = clip_coord(Mstar,Xstar,Ystar,Zstar)
+    
+    Mstar,Xstar,Ystar,Zstar = Gal2MXYZ_part(Gal,part_type = "stars")
+    principal_axes = compute_principal_axis_gen(m=Mstar.value,
+                                                x = Xstar.value,
+                                                y = Ystar.value,
+                                                z = Zstar.value)
+    # ensure the memory is freed
+    del Mstar,Xstar,Ystar,Zstar
+    return principal_axes
 
-    Cx,Cy,Cz = Gal.centre*u.Mpc.to("kpc")*u.kpc/(Gal.xy_propr2comov) # (now) kpc
-
-    Xs -= Cx
-    Ys -= Cy
-    Zs -= Cz
-
-    mass = Mstar.value
-    # center positions first!
-    x = Xs.value
-    y = Ys.value
-    z = Zs.value
-
-    pos = np.transpose([x,y,z])
-    I = np.zeros((3,3))
-    for i in range(len(pos)):
-        r = pos[i]
-        I += mass[i] * np.outer(r, r)
-
-    # eigenvalues
-    eigvals = np.linalg.eigvalsh(I)
-    eigvals = np.sort(eigvals)[::-1]  # λ1 ≥ λ2 ≥ λ3
-
-    a = np.sqrt(eigvals[0])
-    b = np.sqrt(eigvals[1])
-    c = np.sqrt(eigvals[2])
-
-    return c / b
-
+        
 # The following should be done in the test_particle_galaxy
 """    
 # for debug:

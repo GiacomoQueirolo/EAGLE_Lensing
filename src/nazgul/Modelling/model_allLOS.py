@@ -1,4 +1,4 @@
-# Copy from modelling_severals, now we fit for LOS shear instead of external shear
+# Copy from modelling_severals, now we ACTUALLY simulate addition of LOS AND model for it
 import os
 import argparse
 import numpy as np
@@ -26,11 +26,11 @@ from nazgul.plot_PL import plot_kappamap
 from nazgul.stat_lenses import get_all_gallens
 
 from nazgul.lens_part_LOS import get_kw_los
-from nazgul.pathfinder import get_sim_dir
+from nazgul.pathfinder import get_sim_dir,tmp_dir
 
-lens_model_list   = ['EPL',"LOS_MINIMAL"]
+lens_model_list   = ['EPL','LOS_MINIMAL']
 source_model_list = ["SERSIC"]
-res_dir_base      = Path("./tmp/models/fitLOS_fixedOD/")
+res_dir_base      = tmp_dir/"models/allLOS/"
 
 def _get_model_res_dir(lens,res_dir=res_dir_base):
     res_dir = Path(f"{res_dir}/snap_{lens.gallens.Gal.snap}_{lens.name}")
@@ -39,10 +39,12 @@ def get_link_lens_path(lens,res_dir=res_dir_base):
     if not hasattr(lens,"model_res_dir"): 
         lens.model_res_dir = _get_model_res_dir(lens,res_dir=res_dir)
     return lens.model_res_dir/"link_gallens.pkl"
-
+    
 
 def setup_lens(lens,res_dir=res_dir_base):
     lens.model_res_dir = _get_model_res_dir(lens,res_dir=res_dir)
+    lens.setup_lenses(kwargs_add_lenses=lens.kwargs_add_lenses)
+    lens.gallens
     lens.image_sim = lens.get_lensed_image(unconvolved=False)
     mkdir(lens.model_res_dir)
     
@@ -66,8 +68,8 @@ def setup_lens(lens,res_dir=res_dir_base):
     if not os.path.islink(dst):
         os.symlink(src,dst)
     return lens
-
-
+    
+    
 def setup_sim_obs(lens,band_str="HST_F160W",pssf=3):
     if band_str=="HST_F160W":
         band     = HST(band='WFC3_F160W', psf_type="PIXEL")
@@ -141,7 +143,7 @@ def get_lens_mask(lens,image_obs,plot_mask=True):
         print(f"Saving {nm}")
         plt.savefig(nm)
     return mask_LD
-
+    
 def get_kwargs_likelihood(lens,image_obs,plot_mask=True):
     mask = get_lens_mask(lens,image_obs,plot_mask=plot_mask)
     
@@ -155,7 +157,7 @@ def get_kwargs_likelihood(lens,image_obs,plot_mask=True):
                      #'prior_lens': prior_lens
                       "image_likelihood_mask_list": [mask]  }
     return kwargs_likelihood
-
+    
 def get_kwargs_params(lens):
     # Params:
     # initial guess of non-linear parameters, we chose different starting parameters than the truth #
@@ -192,26 +194,44 @@ def get_kwargs_params(lens):
     omega_sigma = 0.1
 
     # this is for the minimal model
-    kwargs_fixed_los = {'kappa_od': 0.0, 'kappa_los': 0.0, 'omega_od': 0.0,'gamma1_od':0,'gamma2_od': 0}
+    kwargs_fixed_los = {'kappa_od': 0.0, 'kappa_los': 0.0, 'omega_od': 0.0}
 
-    kwargs_lens_init.append({'gamma1_los':0, 
-                             'gamma2_los':0,
+    kwargs_lens_init.append({'gamma1_od':0, 'gamma2_od': 0,
+                             'gamma1_los':0, 'gamma2_los':0,
                              'omega_los': 0 })
 
-    kwargs_lens_sigma.append({'gamma1_los': gamma_sigma, 
-                              'gamma2_los': gamma_sigma,
+    kwargs_lens_sigma.append({'gamma1_od': gamma_sigma, 'gamma2_od': gamma_sigma,
+                              'gamma1_los': gamma_sigma, 'gamma2_los': gamma_sigma,
                               'omega_los': omega_sigma})
 
-    kwargs_lower_lens.append({'gamma1_los': -gamma_prior, 
-                              'gamma2_los': -gamma_prior,
+    kwargs_lower_lens.append({'gamma1_od': -gamma_prior, 'gamma2_od': -gamma_prior,
+                              'gamma1_los': -gamma_prior, 'gamma2_los': -gamma_prior,
                               'omega_los': -omega_prior})
 
-    kwargs_upper_lens.append({'gamma1_los': gamma_prior, 
-                              'gamma2_los': gamma_prior,
+    kwargs_upper_lens.append({'gamma1_od': gamma_prior, 'gamma2_od': gamma_prior,
+                              'gamma1_los': gamma_prior, 'gamma2_los': gamma_prior,
                               'omega_los': omega_prior})
+
+    """
+    # this is for the full LOS
+    kwargs_fixed_los = {'kappa_od': 0, 'kappa_os': 0,'kappa_ds':0,
+                        'omega_od': 0.0, 'omega_os': 0.0, 'omega_ds': 0.0}
+    kwargs_lens_init.append({'gamma1_od': 0, 'gamma2_od': 0,
+                             'gamma1_os': 0, 'gamma2_os': 0,
+                             'gamma1_ds': 0, 'gamma2_ds': 0})
+    kwargs_lens_sigma.append({'gamma1_od': gamma_sigma, 'gamma2_od': gamma_sigma,
+                              'gamma1_os': gamma_sigma, 'gamma2_os': gamma_sigma,
+                              'gamma1_ds': gamma_sigma, 'gamma2_ds': gamma_sigma})
+    kwargs_lower_lens.append({'gamma1_od': -gamma_prior, 'gamma2_od': -gamma_prior,
+                              'gamma1_os': -gamma_prior, 'gamma2_os': -gamma_prior,
+                              'gamma1_ds': -gamma_prior, 'gamma2_ds': -gamma_prior})
+
+    kwargs_upper_lens.append({'gamma1_od': gamma_prior, 'gamma2_od': gamma_prior,
+                              'gamma1_os': gamma_prior, 'gamma2_os': gamma_prior,
+                              'gamma1_ds': gamma_prior, 'gamma2_ds': gamma_prior})
+    """
     
-    lens_params   = [kwargs_lens_init, kwargs_lens_sigma, 
-                     [{}, kwargs_fixed_los], kwargs_lower_lens, kwargs_upper_lens]
+    lens_params = [kwargs_lens_init, kwargs_lens_sigma, [{}, kwargs_fixed_los], kwargs_lower_lens, kwargs_upper_lens]
     source_params = [kwargs_source_init, kwargs_source_sigma, [{}], kwargs_lower_source, kwargs_upper_source]
     
     kwargs_params = {'lens_model': lens_params,
@@ -236,7 +256,7 @@ def get_lenses2model(kw_get_all_gallens={"snaps":[27]},n_lenses=5,skip_lenses=[]
                 print(f"Ignoring lens {l} because in the list of lenses to skip")
         lenses_selected = lenses_accepted
     return lenses_selected
-
+    
 #PSO
 n_it_std   = 2000
 n_part_std = 500
@@ -267,19 +287,19 @@ if __name__=="__main__":
         n_burn = int(1) #MCMC burn in steps
     else:
         raise RuntimeError("Give a valid run_type or implement it your own")
-    
-    lenses2skip = [] # ["Sub_Gn22SGn0_Npix200_PartAS_Prj2"]
+
+    lenses2skip = ["Sub_Gn22SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj1","Sub_Gn3SGn0_Npix200_PartAS_Prj2"]
     #["Sub_Gn3SGn0_Npix200_PartAS_Prj1","Sub_Gn22SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj2"]
     gal_lenses  = get_lenses2model(skip_lenses=lenses2skip)
     for gal_lens in gal_lenses: 
         print("Loading lens "+gal_lens.name+"\n")
-        """print("Adding LOS effects")
+        print("Adding LOS effects")
         kw_los = get_kw_los()
         kw_add_lenses = {"lens_model_list":["LOS"],
                         "kwargs_lens":[kw_los]}
         lens = LensSystem.from_GalLens(gal_lens,kwargs_add_lenses=kw_add_lenses)
-        """
-        lens = LensSystem.from_GalLens(gal_lens)
+        
+        #lens = LensSystem.from_GalLens(gal_lens)
         """
         if lens.gallens.thetaE.value<min_thetaE:
             raise RuntimeError(f"Ensure that the thetaE of the input lens is larger than min_thetaE: {lens.gallens.thetaE.value}<{min_thetaE}")
@@ -328,7 +348,8 @@ if __name__=="__main__":
                     "kwargs_constraints":  kwargs_constraints, 
                     "kwargs_likelihood":   kwargs_likelihood, 
                     "kwargs_params":       kwargs_params,
-                    "fitting_kwargs_list": fitting_kwargs_list
+                    "fitting_kwargs_list": fitting_kwargs_list,
+                    "kw_add_lenses":       kw_add_lenses
                    }
         nm_input = f"{lens.model_res_dir}/kw_input.dll"
         with open(nm_input,"wb") as f:

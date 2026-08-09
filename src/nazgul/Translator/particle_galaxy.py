@@ -68,7 +68,12 @@ class BasicPartGal(BasicGal):
         """
         base = Path(path_nazgul_load) if path_nazgul_load is not None else path_nazgul
         return base / self.dill_path
-        
+
+    def slim_down(self):
+        # delete all heavy attributes from class to reduce memory load
+        for la in self._large_attributes_setup:
+            if hasattr(self, la):
+                delattr(self,la)
     ### Class Structure ####
     ########################
     def __str__(self):
@@ -99,6 +104,10 @@ class BasicPartGal(BasicGal):
         raise NotImplementedError
 
 def clip_coord(m,x,y,z,sigma=10,perc_thresh=99):
+    _verify_mxyz_input(m,x,y,z)
+    if len(x)==0:
+        # No particles to start with, no particles to clip
+        return m,x,y,z
     # clip coordinates outliers
     dists = np.sum(np.array([x,y,z])**2,axis=0)
     mask = np.invert(sigma_clip(dists,sigma=sigma).mask)
@@ -107,9 +116,43 @@ def clip_coord(m,x,y,z,sigma=10,perc_thresh=99):
     #    mask *= np.invert(sigma_clip(coord,sigma=sigma).mask)
     perc_final = np.round(len(m[mask])*100/len(m),3)
     if perc_final<perc_thresh:
-        print(100-perc_final,"% of particle discarded")
+        print(np.round(100-perc_final,2),"% of particle discarded")
         raise RuntimeError("Too many particles discarded")
         
     return m[mask],x[mask],y[mask],z[mask]
     
 
+
+def compute_principal_axis_gen(m,x,y,z):
+    """
+    Compute eigenvalues of the mass-weighted inertia tensor, which can be used to infer the 3D axis of the particles
+    """
+    _verify_mxyz_input(m,x,y,z)
+    # We have interest in the shape, not absolute value
+    x -= np.mean(x)
+    y -= np.mean(y)
+    z -= np.mean(z)
+    
+    pos = np.transpose([x,y,z])
+    m   = np.array(m) # ensures no issues with dimensions
+    I   = np.zeros((3,3))
+    for i in range(len(pos)):
+        r = pos[i]
+        I += m[i] * np.outer(r, r)
+
+    # eigenvalues
+    eigvals = np.linalg.eigvalsh(I)
+    eigvals = np.sort(eigvals)[::-1]  # λ1 ≥ λ2 ≥ λ3
+
+    a = np.sqrt(eigvals[0])
+    b = np.sqrt(eigvals[1])
+    c = np.sqrt(eigvals[2])
+    
+    principal_axes = {"a":a,"b":b,"c":c,"I3D":I}
+
+    return principal_axes
+
+def _verify_mxyz_input(m,x,y,z):
+    assert len(m)==len(x)
+    assert len(y)==len(x)
+    assert len(z)==len(x)

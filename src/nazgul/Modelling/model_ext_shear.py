@@ -1,4 +1,4 @@
-# Copy from modelling_severals, now we fit for LOS shear instead of external shear
+# Copy from modelling_updated, now we simulate addition of LOS
 import os
 import argparse
 import numpy as np
@@ -26,11 +26,11 @@ from nazgul.plot_PL import plot_kappamap
 from nazgul.stat_lenses import get_all_gallens
 
 from nazgul.lens_part_LOS import get_kw_los
-from nazgul.pathfinder import get_sim_dir
+from nazgul.pathfinder import get_sim_dir,tmp_dir
 
-lens_model_list   = ['EPL',"LOS_MINIMAL"]
+lens_model_list   = ['EPL','SHEAR_GAMMA_PSI']
 source_model_list = ["SERSIC"]
-res_dir_base      = Path("./tmp/models/fitLOS/")
+res_dir_base      = tmp_dir/"models/ext_shear/"
 
 def _get_model_res_dir(lens,res_dir=res_dir_base):
     res_dir = Path(f"{res_dir}/snap_{lens.gallens.Gal.snap}_{lens.name}")
@@ -160,76 +160,29 @@ def get_kwargs_params(lens):
     # Params:
     # initial guess of non-linear parameters, we chose different starting parameters than the truth #
     tE = lens.gallens.thetaE.value
-
-    # LOS added separately    
     kwargs_lens_init = [{'theta_E': tE + np.random.normal(0,.1,1)[0]*tE, 
                     'e1': 0, 'e2': 0, 
                     'gamma': 2., 
-                    'center_x': 0., 'center_y': 0}]
+                    'center_x': 0., 'center_y': 0},
+                    {'gamma_ext': 0.01, 'psi_ext': 0.}]
     kwargs_source_init = [{'R_sersic': 0.03, 'n_sersic': 1., 'center_x': 0, 'center_y': 0}]
     
     # initial spread in parameter estimation #
     kwargs_lens_sigma = [{'theta_E': 0.3, 
                           'e1': 0.2, 'e2': 0.2, 'gamma': .2, 
-                          'center_x': 0.1, 'center_y': 0.1}]
+                          'center_x': 0.1, 'center_y': 0.1},
+                        {'gamma_ext': 0.1, 'psi_ext': np.pi}]
     kwargs_source_sigma = [{'R_sersic': 0.1, 'n_sersic': .5, 'center_x': .1, 'center_y': 0.1}]
     
     # hard bound lower limit in parameter space #
-    kwargs_lower_lens = [{'theta_E': 0, 'e1': -0.5, 'e2': -0.5, 'gamma': 1.5, 'center_x': -10., 'center_y': -10}]
+    kwargs_lower_lens = [{'theta_E': 0, 'e1': -0.5, 'e2': -0.5, 'gamma': 1.5, 'center_x': -10., 'center_y': -10},
+        {'gamma_ext': 0., 'psi_ext': -np.pi}]
     kwargs_lower_source = [{'R_sersic': 0.001, 'n_sersic': .5, 'center_x': -10, 'center_y': -10}]
     # hard bound upper limit in parameter space #
-    kwargs_upper_lens = [{'theta_E': 10, 'e1': 0.5, 'e2': 0.5, 'gamma': 2.5, 'center_x': 10., 'center_y': 10}]
+    kwargs_upper_lens = [{'theta_E': 10, 'e1': 0.5, 'e2': 0.5, 'gamma': 2.5, 'center_x': 10., 'center_y': 10},
+        {'gamma_ext': 0.3, 'psi_ext': np.pi}]
     kwargs_upper_source = [{'R_sersic': 10, 'n_sersic': 5., 'center_x': 10, 'center_y': 10}]
-
-    # add LOS params
-    # First we fix to 0 kappa and omega (not gamma_od for now)
-    # omega_LOS should not be fixed! the LOS shears in combination induce a small rotation
-    # allowing for freedom in omega_LOS accounts for this and prevents bias in the shears
-    
-    gamma_prior = 0.5
-    omega_prior = 0.5
-    gamma_sigma = 0.1
-    omega_sigma = 0.1
-
-    # this is for the minimal model
-    kwargs_fixed_los = {'kappa_od': 0.0, 'kappa_los': 0.0, 'omega_od': 0.0}
-
-    kwargs_lens_init.append({'gamma1_od':0, 'gamma2_od': 0,
-                             'gamma1_los':0, 'gamma2_los':0,
-                             'omega_los': 0 })
-
-    kwargs_lens_sigma.append({'gamma1_od': gamma_sigma, 'gamma2_od': gamma_sigma,
-                              'gamma1_los': gamma_sigma, 'gamma2_los': gamma_sigma,
-                              'omega_los': omega_sigma})
-
-    kwargs_lower_lens.append({'gamma1_od': -gamma_prior, 'gamma2_od': -gamma_prior,
-                              'gamma1_los': -gamma_prior, 'gamma2_los': -gamma_prior,
-                              'omega_los': -omega_prior})
-
-    kwargs_upper_lens.append({'gamma1_od': gamma_prior, 'gamma2_od': gamma_prior,
-                              'gamma1_los': gamma_prior, 'gamma2_los': gamma_prior,
-                              'omega_los': omega_prior})
-
-    """
-    # this is for the full LOS
-    kwargs_fixed_los = {'kappa_od': 0, 'kappa_os': 0,'kappa_ds':0,
-                        'omega_od': 0.0, 'omega_os': 0.0, 'omega_ds': 0.0}
-    kwargs_lens_init.append({'gamma1_od': 0, 'gamma2_od': 0,
-                             'gamma1_os': 0, 'gamma2_os': 0,
-                             'gamma1_ds': 0, 'gamma2_ds': 0})
-    kwargs_lens_sigma.append({'gamma1_od': gamma_sigma, 'gamma2_od': gamma_sigma,
-                              'gamma1_os': gamma_sigma, 'gamma2_os': gamma_sigma,
-                              'gamma1_ds': gamma_sigma, 'gamma2_ds': gamma_sigma})
-    kwargs_lower_lens.append({'gamma1_od': -gamma_prior, 'gamma2_od': -gamma_prior,
-                              'gamma1_os': -gamma_prior, 'gamma2_os': -gamma_prior,
-                              'gamma1_ds': -gamma_prior, 'gamma2_ds': -gamma_prior})
-
-    kwargs_upper_lens.append({'gamma1_od': gamma_prior, 'gamma2_od': gamma_prior,
-                              'gamma1_os': gamma_prior, 'gamma2_os': gamma_prior,
-                              'gamma1_ds': gamma_prior, 'gamma2_ds': gamma_prior})
-    """
-    
-    lens_params = [kwargs_lens_init, kwargs_lens_sigma, [{}, kwargs_fixed_los], kwargs_lower_lens, kwargs_upper_lens]
+    lens_params = [kwargs_lens_init, kwargs_lens_sigma, [{}, {'ra_0': 0, 'dec_0': 0}], kwargs_lower_lens, kwargs_upper_lens]
     source_params = [kwargs_source_init, kwargs_source_sigma, [{}], kwargs_lower_source, kwargs_upper_source]
     
     kwargs_params = {'lens_model': lens_params,
@@ -286,7 +239,10 @@ if __name__=="__main__":
     else:
         raise RuntimeError("Give a valid run_type or implement it your own")
 
-    lenses2skip = [] # ["Sub_Gn22SGn0_Npix200_PartAS_Prj2"]
+    #lenses2skip = ["Sub_Gn22SGn0_Npix200_PartAS_Prj2"]
+    lenses2skip = ["Sub_Gn22SGn0_Npix200_PartAS_Prj0","Sub_Gn22SGn0_Npix200_PartAS_Prj2","Sub_Gn3SGn0_Npix200_PartAS_Prj2","Sub_Gn3SGn0_Npix200_PartAS_Prj0"]
+ 
+    #["Sub_Gn22SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj1","Sub_Gn22SGn0_Npix200_PartAS_Prj2","Sub_Gn3SGn0_Npix200_PartAS_Prj2","Sub_Gn3SGn0_Npix200_PartAS_Prj0"]
     #["Sub_Gn3SGn0_Npix200_PartAS_Prj1","Sub_Gn22SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj0","Sub_Gn3SGn0_Npix200_PartAS_Prj2"]
     gal_lenses  = get_lenses2model(skip_lenses=lenses2skip)
     for gal_lens in gal_lenses: 

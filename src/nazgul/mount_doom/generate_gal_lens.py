@@ -7,9 +7,9 @@ Revolves around the GalLens class, plus several helper functions
      -> still compute lensing effects given z_lens and z_source, but those will be corrected for in the Lenstronomy profile
 
 """
-
-import dill
+import os,gc
 import warnings
+import tracemalloc
 import numpy as np
 from glob import glob
 from pathlib import Path
@@ -17,6 +17,7 @@ from time import gmtime, strftime
 from functools import cached_property 
 
 import astropy.units as u
+import matplotlib.pyplot as plt
 from lenstronomy.Util.util import array2image,make_grid
 #from lenstronomy.ImSim.Numerics.grid import RegularGrid
 
@@ -37,14 +38,16 @@ from nazgul.likelihood import Likelihood
 from nazgul.project_gal import get_2Dkappa_map,ProjectionError
 from nazgul.project_gal import Gal2kw_samples,ProjGal
 from nazgul.pathfinder import get_lens_lowdir_from_galdir,get_proj_dir_from_galdir
-
 from nazgul.mount_doom.cracks_of_doom import BasicLensPart,get_extents,kw_prior_z_source_stnd
-
 #Default values
 import nazgul.configurations as conf
 # Plotting tools 
 from nazgul.plot_AMRxpart import plot_AMR_densityXpart
+# debugging memory leak tools
+from python_tools.memory_leak_tools import log_memory,log_top_allocs
 
+# WOI cross-machine lock
+from python_tools.tools_WOI import workin_on_it, set_workin_on_it, is_someone_workin_on_it
 
 class GalLens(BasicLensPart): 
     _large_attributes_setup  = ["kwargs_lens","lens_prof","Gal","PartLens","cosmo"]
@@ -73,19 +76,20 @@ class GalLens(BasicLensPart):
         self.ignore_OoBErr = ignore_OoBErr
         self.savedir  = get_lens_lowdir_from_galdir(galdir=self.Gal.gal_dir)
         mkdir(self.savedir)
-
+        self._compute_identity()
     ### Class Structure ####
     ########################
-    def _identity(self):
-        """Return an immutable tuple uniquely identifying this galaxy.
-
-        The identity is used for hashing, equality, and cache keys.
-        """
+    
+    def _compute_identity(self):
+        """Compute identity from arguments available at instantiation."""
         #MONKEY_PATCH
         if not hasattr(self,"scale_tE"):
-            print("Recovering scale_tE from radius and thetaE") 
+            print("MONKEY_PATCH: Recovering scale_tE from radius and thetaE") 
             self.scale_tE = (self.radius/self.thetaE).value
-        return (
+        if not hasattr(self,"Gal"):
+            print("MONKEY_PATCH: unpacking to get Gal id") 
+            self.unpack()
+        _id = (
             self.Gal._identity(),
             self.PartLens._identity(),
             self.pixel_num,
@@ -93,6 +97,21 @@ class GalLens(BasicLensPart):
             self.kwlens_part,
             self.scale_tE
             )
+        if hasattr(self,"_id_cached"):
+            if _id!=self._id_cached:
+                raise RuntimeError("This should be impossible")
+        self._id_cached = _id
+        
+    def _identity(self):
+        """Return an immutable tuple uniquely identifying this galaxy.
+
+        The identity is used for hashing, equality, and cache keys.
+        """
+        if not hasattr(self,"_id_cached"):
+            print("MONKEY_PATCH: Recomputing id")
+            self._compute_identity()
+        return self._id_cached
+
     ########################
     @property
     def name(self):
@@ -294,60 +313,98 @@ def gal_already_computed(Gal):
                 gal_computed = False
                 return gal_computed
     return gal_computed
+
+def is_gal_to_compute(Gal,reload=True,_list_of_skippable_gals=None,check_if_workin_on_it=True):
+    """
+    Check if Gal is being already computed 
+    (if so for simplicity skip completely even if we could compute individual projections separately)
+    then 
+    Load Gal (considering gal_already_computed, _list_of_skippable_gals and reload flag)
+    """
+    # Check if someone is already working on this galaxy
     
-def wrapper_get_all_lens(reload=True,
+    # verify that no-one is working on it
+    if check_if_workin_on_it:
+        if is_someone_workin_on_it(Gal.gal_dir):
+            warnings.warn(f"This galaxy {Gal.name} is being worked on, skipping- if not, delete the {workin_on_it} file") 
+            return None
+        set_workin_on_it(Gal.gal_dir,wrk = True)
+
+    # Check if alread_computed and skip if needed
+    if gal_already_computed(Gal):
+        print("Galaxy already computed")
+        if _list_of_skippable_gals is not None:
+            if Gal_name in _list_of_skippable_gals:
+                print("Skipping because in skippable list")
+                return None
+        if reload:
+            print("Reloading")
+        else:
+            print("Recomputing")
+            Gal.run(reload=reload)
+    else:
+        Gal.run(reload=reload)
+
+    return Gal
+
+def wrapper_forge_all_lenses(reload=True,
                         kw_lenspart={},
                         kw_galpart={},
                         verbose=True,
                         consider_all_proj=True,
                         _test=False,
-                        _list_of_skippable_gals=None):
+                        _list_of_skippable_gals=None,
+                        debug=False):
     """Get a lens from all available galaxies"""
     kw_lenspart = get_kw_lenspart(reload,kw_lenspart)
     kw_galpart  = get_kw_galpart(kw_galpart)
     all_Gal     = get_all_PG(**kw_galpart)
-    all_lenses  = []
-    if verbose:
-        print(f"Found n={len(all_Gal)} Galaxies")
+    if debug:
+        tracemalloc.start() 
+    N_lenses    = 0
     for Gal in all_Gal:
+        Gal_name = Gal.name
+        print(f"\nNew Gal:\n     {Gal_name}\n")
         # Verify if all proj. have not already been computed 
         # (not important if it is a lens or not)
-        print(f"\nNew Gal:\n     {Gal.name}\n")
         try:
-            if gal_already_computed(Gal):
-                print("Galaxy already computed")
-                if _list_of_skippable_gals is not None:
-                    if Gal.name in _list_of_skippable_gals:
-                        print("Skipping because in skippable list")
-                        continue
-                if reload:
-                    print("Reloading")
-                else:
-                    print("Recomputing")
-                    Gal.run(reload=reload)
-            else:
-                Gal.run(reload=reload)
+            Gal = is_gal_to_compute(Gal,reload=reload,_list_of_skippable_gals=_list_of_skippable_gals)
+            if Gal is None:
+                # means to be skipped
+                continue
             strikes = 0
             while kw_lenspart["projection_index"]<3:
+                mod_LP = None
                 try:
-                    mod_LP = GalLens(Galaxy=Gal,
-                                  **kw_lenspart)
+                    log_memory(f"before GalLens run {Gal_name}")
+                    mod_LP = GalLens(Galaxy=Gal,**kw_lenspart)
                     mod_LP.run(read_prev=reload)
-                    all_lenses.append(mod_LP)
+                    log_memory(f"after GalLens run {Gal_name}")
+                    supercrit = True
                     pji = kw_lenspart["projection_index"]
-                    print(f"Projection {pji} of {Gal.name} is supercritical!\n")
+                    print(f"Projection {pji} of {Gal_name} is supercritical!\n")
                     # Plotting density for each individual particle
-                    plot_AMR_densityXpart(Gal=Gal,
+                    plot_AMR_densityXpart(Gal=mod_LP.Gal,
                                           proj_index=pji,
-                                          savedir=mod_LP.savedir)
+                                          savedir=mod_LP.savedir,
+                                          rerun=not reload)
+                    plt.close("all")
+                    N_lenses+=1
+                    del mod_LP
+                    mod_LP = None
+                    log_memory(f"after plot_AMR_densityXpart run {Gal_name}")
+
                     if not consider_all_proj:
                         print(f"Considering only the first supercritical solution.\n")
                         break
                 except ProjectionError as PE:
+                    if mod_LP is not None:
+                        del mod_LP
+                    gc.collect()
                     strikes+=1
                 kw_lenspart["projection_index"]+=1
             if strikes==3:
-                print(f"All projections of Galaxy {Gal.name} are not supercritical")
+                print(f"All projections of Galaxy {Gal_name} are not supercritical")
             print("Next galaxy.")
             if verbose:
                 print("#########\nTime stamp:\n")
@@ -356,18 +413,31 @@ def wrapper_get_all_lens(reload=True,
             kw_lenspart["projection_index"] = 0
             if _test:
                 print("TEST - Stopping after only one")
+                set_workin_on_it(Gal.gal_dir,wrk = True)
                 return all_lenses
-        except RuntimeError:
-            print('RUNTIME ERROR FOR THIS GALAXY, MOVING TO NEXT')
-            continue
-    if _test:
-        print("TEST - Stopping after only one")
-        return all_lenses
-    if verbose:
-        print(f"Found n={len(all_lenses)} Lenses")
-        print(f"i.e. {np.round(len(all_lenses)/len(all_Gal*3)*100,1)}% of Galaxies (considering their rotations)")
+        except RuntimeError as RE:
+            print(f'RUNTIME ERROR FOR THIS GALAXY:\n{RE}\nMOVING TO NEXT')
+            kw_lenspart["projection_index"] = 0
+        finally:
+            try:
+                Gal.slim_down()
+            except:
+                pass
+            try:
+                del mod_LP
+                gc.collect()
+            except NameError or UnboundLocalError:
+                mod_LP = None
+                pass
+            log_memory(f"after {Gal_name}")
+            if debug:
+                log_top_allocs(f"after {Gal_name}")
+        set_workin_on_it(Gal.gal_dir,wrk = True)
+    if verbose and not _test:
+        print(f"Found n={N_lenses} Lenses")
+        print(f"i.e. {np.round(N_lenses/len(all_Gal*3)*100,1)}% of Galaxies (considering their rotations)")
 
-    return all_lenses
+    
 
 # get a lens no matter what:
 def wrapper_get_rnd_lens(reload=True,
@@ -378,19 +448,39 @@ def wrapper_get_rnd_lens(reload=True,
     """
     kw_lenspart = get_kw_lenspart(reload,kw_lenspart)
     kw_galpart  = get_kw_galpart(kw_galpart)
+    tracemalloc.start()
     while True:
         # TODO: this is efficient the first time, but if the galaxy is already computed as a lens,
         # it's a waste of time : verify if all projection are not already computed/ lensed given
         # the parameters
         Gal = get_rnd_PG(**kw_galpart)
         Gal.run()
+        Gal_name = Gal.name
+        mod_LP = None
         while kw_lenspart["projection_index"]<3:
             try:
-                mod_LP = GalLens(Galaxy=Gal,
-                              **kw_lenspart)
+                log_memory(f"before GalLens run {Gal.name}")
+                mod_LP = GalLens(Galaxy=Gal,**kw_lenspart)
                 mod_LP.run(read_prev=reload)
+                mod_LP.Gal.slim_down()
+                log_mem(f"after GalLens run {Gal.name}")
+                pji = kw_lenspart["projection_index"]
+                print(f"Projection {pji} {Gal.name} is supercritical!\n")
+                # Plotting density for each individual particle
+                plot_AMR_densityXpart(Gal=mod_LP.Gal,
+                                      proj_index=pji,
+                                      savedir=mod_LP.savedir)
+                plt.close("all")
+                log_memory(f"after plot_AMR_densityXpart run {Gal.name}")
                 return mod_LP
             except ProjectionError as PE:
+                if mod_LP is not None:
+                    del mod_LP
+                    gc.collect()
                 kw_lenspart["projection_index"]+=1
+        del Gal        
+        gc.collect()
+        log_memory(f"after {Gal_name}") 
+        log_top_allocs(f"after {Gal_name}")
         print("All projections of this galaxy are not supercritical #\n","Trying different galaxy")
         kw_lenspart["projection_index"] = 0

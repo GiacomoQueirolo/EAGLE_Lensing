@@ -3,13 +3,20 @@ Restructured from generate_particle_lens_dom with a different philosofy in mind:
 This class should be as simple as possible, basically only a conveniency wrapper for LensModel, 
 but geared toward the galaxy lens
 """
+import dill
+import warnings
 import numpy as np
 from pathlib import Path
 # for debug plots
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from scipy.ndimage import zoom
-from scipy.interpolate import RectBivariateSpline
+from scipy.spatial import Delaunay
+from scipy.ndimage import gaussian_filter
+from scipy.interpolate import RectBivariateSpline,griddata
+
+from astropy.stats import sigma_clip
 
 from lenstronomy.Util import util
 from lenstronomy.Util.util import array2image,image2array 
@@ -18,10 +25,13 @@ from lenstronomy.LensModel.lens_model import LensModel
 from lenstronomy.ImSim.Numerics.numerics_subframe import NumericsSubFrame
 
 # My libs
-from python_tools.tools import to_dimless,mkdir
+from python_tools.tools import to_dimless,mkdir,to_uid
 import nazgul.mount_doom.cracks_of_doom as cod
 from nazgul.project_gal import get_2Dkappa_map
+# Class structure
+from nazgul.basic_gal import BasicGal
 from nazgul.mount_doom.generate_gal_lens import GalLens
+from nazgul.mount_doom.cracks_of_doom import store_lens,_resolve_gal_path,LoadLens
 
 # Default values
 # particle lens class and params.
@@ -29,12 +39,18 @@ from nazgul.mount_doom.cracks_of_doom import source_model_list
 from nazgul.configurations import pixel_num,min_thetaE
 from nazgul.particle_lenses import default_kwlens_part_AS  as kwlens_part_AS
 from nazgul.mount_doom.cracks_of_doom import kwargs_band_sim,kw_prior_z_source_stnd
+from nazgul.mount_doom.cracks_of_doom import kwargs_source_default,get_kwargs_sourceSim
 
 verbose = True
 empty_kwargs_add_lenses = {"lens_model_list":[],"kwargs_lens":[]}
 
 
-class LensSystem():
+class LensSystem(BasicGal):
+    # Large attributes to not store and to recompute/reload BEFORE computation
+    _large_attributes_setup  = []
+    # Large attributes to not store and to recompute/reload AFTER computation
+    _large_attributes_unpack = ["cosmo","lens_model"]
+    
     def __init__(self,
                  kwargs_gallens,  #                 
                     #Galaxy,
@@ -70,30 +86,82 @@ class LensSystem():
         self.kwargs_band_sim     = kwargs_band_sim
         # We assume that the cosmology has to be the same as the galaxy:
         self.cosmo               = self.gallens.cosmo
+        self.kwargs_source_def   = kwargs_source_default
         mkdir(self.savedir)
 
+
+    def _identity(self):
+        return (
+            self.gallens._identity(),
+            self.kwargs_lensmodel,
+            self.kwargs_add_lenses,
+            self.kwargs_band_sim)
+        
     def setup(self,
                 Sim=None,
-                update_source_pos=False,
+                update_source_pos=True,
+                reload=True,
+                rnd_seed=None, # to set differently to sample new source pos
                 verbose=verbose):
-           
-        self.gallens.unpack()
-        self.gallens.run()
-        self.create_lens(kwargs_add_lenses=self.kwargs_add_lenses, # these are given here as the self, but in principle with the freedom to re-define them
-                         Sim=Sim,verbose=verbose)
-        if update_source_pos:
-            self.sample_source_pos(update=update_source_pos)
+        upload_successful = False
+        if reload:
+            upload_successful = self.upload_prev()
+        if not upload_successful:
+            self.gallens.unpack()
+            self.gallens.run()
+            self.create_lens(kwargs_add_lenses=self.kwargs_add_lenses, # these are given here as the self, but in principle with the freedom to re-define them
+                             Sim=Sim,verbose=verbose)
+            if update_source_pos:
+                self.sample_source_pos(update=update_source_pos,rnd_seed=rnd_seed)
+            elif self.kwargs_source_def["center_x"]==0 and self.kwargs_source_def["center_y"]==0:
+                warnings.warn("Source is still positioned at 0,0 but I was instructed not to resample its position.")
+            # store the results
+            self.store()
     #############################
     @property
     def savedir(self):
         return Path(self.gallens.Gal.gal_dir).parent/"LensSystem"
     @property
+    def pkl_path(self):
+        return _resolve_gal_path(self.savedir)/f"{self.name}_{self._hash_b64}.pkl"
+    @property
+    def _rnd_seed(self):
+        """
+        Define a random seed unique for this specific lens. 
+        Used for reproducibility  
+        """
+        _str = self.pkl_path
+        # have to cut it if not it's too long
+        seed = int(str(to_uid(_str))[:9])
+        return seed
+
+    def ReadClass(self,cl,verbose=True):
+        LS = LoadLens(cl.pkl_path,verbose=verbose)
+        return LS
+        
+    def _unpack(self):
+        """Reconstruct all attributes that were intentionally removed
+        before serialization.
+        """
+        print("Unpacking system lens...")
+        self.gallens.unpack()
+        self.cosmo = self.gallens.cosmo
+
+    def __str__(self):
+        """Human-readable identifier.
+
+        Lazily initializes the name if it has not been generated yet.
+        """
+        return f'Name:{self.name}\nHash:{self._hash_b64}'
+
+    @property
     def name(self):
         # define name and path of savefile
         name_lnsp = self.gallens.name
         # to correct asap
-        name= name_lnsp.replace("Sub_","")
+        name= name_lnsp.replace("Sub_","LS_")
         return name
+        
     @classmethod
     def from_GalLens(cls, GalLens,**kwargs_lenssystem):
         """Construct from an existing GalLens instance."""
@@ -109,6 +177,7 @@ class LensSystem():
         obj.kwargs_add_lenses   = kwargs_lenssystem.get("kwargs_add_lenses",empty_kwargs_add_lenses)
         # observational params
         obj.kwargs_band_sim     = kwargs_lenssystem.get("kwargs_band_sim",kwargs_band_sim)
+        obj.kwargs_source_def   = kwargs_lenssystem.get("kwargs_source",kwargs_source_default)
         return obj
         
     #############################
@@ -117,17 +186,20 @@ class LensSystem():
     ###############
     
 
-    def create_lens(self,kwargs_add_lenses=empty_kwargs_add_lenses,Sim=None,verbose=verbose):
+    def create_lens(self,kwargs_add_lenses=empty_kwargs_add_lenses,
+                    Sim=None,kwargs_source=None,verbose=verbose):
         # Define the radius based on ~ theta_E
         self.radius    = self.gallens.radius
         if verbose:
             print("Image radius:",np.round(self.radius,3))        
         # setup dataclasses (dataclass,psf_class,sourcemodel and some helper kwargs):
-        self.setup_dataclasses(Sim=Sim,verbose=verbose)
+        self.setup_dataclasses(Sim=Sim, verbose=verbose)
         # setup lenses 
         self.setup_lenses(kwargs_add_lenses=kwargs_add_lenses,
-                        verbose=verbose)
-
+                        verbose=verbose)        
+    def store(self):
+        store_lens(self)
+        
     def setup_dataclasses(self,Sim=None,verbose=True):
         """
         Define all classes not dependent on lensing
@@ -137,7 +209,7 @@ class LensSystem():
             Sim = self.get_Sim()
         if verbose:
             print("Setting up data classes ...")
-        self.data_class,self.psf_class,self.source_model_class,self.kwargs_numerics,self.kwargs_source = cod.get_dataclasses(Sim)
+        self.data_class,self.psf_class,self.source_model_class,self.kwargs_numerics = cod.get_dataclasses(Sim)
         if verbose:
             print("... Data classes set up")
         return 0
@@ -274,16 +346,21 @@ class LensSystem():
     def shear_map(self,_radec=None):
         return self.get_kw_shear(_radec=_radec)["shear"]
 
-    # Caustics 
+    # Caustics
     ##########
     
     def get_kw_critical_curve_caustics(self,
-                                       _radec=None):
+                                       _radec=None,
+                                      reload=True):
         """ Fit the critical curve and map it to the caustic
         """
+        if hasattr(self,"kw_crit"):
+            print("Reloading critical lines")
+            return self.kw_crit
         # note: alpha is computed from the particle (and shear from alpha)
         # thus depends on the particle lens model chosen, while kappa
         # is obtained directly as a density map + cosmological scaling
+        print("Computing critical lines...")        
         alpha_x,alpha_y = self.alpha_map(_radec=_radec)
         kappa           = self.kappa_map(_radec=_radec)
         shear           = self.shear_map(_radec=_radec)
@@ -293,51 +370,85 @@ class LensSystem():
             pixel_num = int(np.sqrt(_radec[0].shape))
         else:
             pixel_num = self.gallens.pixel_num
-        eigen_rad = 1 - kappa + shear
-        eigen_tan = 1 - kappa - shear
-        # have to find when those are ~0
-        mintv = np.min(np.abs(eigen_rad))
-        Dv    = np.max(np.abs(eigen_rad)) - mintv
-        maxtv = mintv + 0.1*Dv
-        test_values = np.linspace(mintv,maxtv,20)
-        ierx,ietx = [],[] #placeholders 
-        # radial
-        for tv in test_values:
-            if len(ierx)/(pixel_num**2) >0.001 :
-                break
-            else:
-                iery,ierx = np.where(cod.MAD_mask(np.abs(eigen_rad),0,tv)) 
-        # tangential
-        mintv = np.min(np.abs(eigen_tan))
-        Dv = np.max(np.abs(eigen_tan)) - mintv
-        maxtv = mintv + 0.1*Dv
-        test_values = np.linspace(mintv,maxtv,20)
-        for tv in test_values:
-            if len(ietx)/(pixel_num**2) >0.001:
-                break
-            else:
-                iety,ietx = np.where(cod.MAD_mask(np.abs(eigen_tan),0,tv))
-        if len(iery)==0:
-            plt.close()
-            dbg_plot = "tmp/eigen_rad.png"
-            plt.imshow(np.abs(eigen_rad))
-            plt.savefig(dbg_plot)
-            plt.colorbar()
-            plt.close()
-            raise RuntimeError(f"Radial critical curve not found.\nCheck {dbg_plot}")
-        if len(iety)==0:
-            plt.close()
-            dbg_plot = "tmp/eigen_tan.png"
-            plt.imshow(np.abs(eigen_tan))
-            plt.savefig(dbg_plot)
-            plt.colorbar()
-            plt.close()
-            raise RuntimeError(f"Tangential critical curve not found.\nCheck {dbg_plot}")
         # coords
         if _radec is None:
             _radec          = self.gallens._radec
         RA,DEC      = cod.get_RADEC(_radec)
         ra0,dec0    = RA[0],DEC.T[0]
+
+        eigen_rad_orig = 1 - kappa + shear
+        eigen_tan_orig = 1 - kappa - shear
+
+        if not np.any(eigen_rad_orig<0):
+            raise RuntimeError("No negative radial eigenvalue - something is off")
+        if not np.any(eigen_tan_orig<0):
+            raise RuntimeError("No negative radial eigenvalue - something is off")
+        # it's not enough that there is 1 point<0, there have to be at least a few
+        min_points = 10
+        # clipping outliers and smoothing with a guassian filter (wrapper try to optimise the smoothing)
+        eigen_rad,is_rad_smooth = wrapper_clip_smooth_map(eigen_rad_orig,name="Eigen radial",min_points=min_points)
+        eigen_tan,is_tan_smooth = wrapper_clip_smooth_map(eigen_tan_orig,name="Eigen tangetial",
+                                                          min_points=min_points)
+
+        iery,ierx = get0_index(eigen_rad,pixel_num)
+        iety,ietx = get0_index(eigen_rad,pixel_num)
+        
+        if len(iery)<min_points:            
+            ####DEBUG####
+            nm = "tmp/eigen_rad.dll"
+            with open(nm,"wb") as f:
+                dill.dump([eigen_rad_orig,eigen_rad,is_rad_smooth],
+                          f)
+            print(f"Check {nm}")
+            ###############
+            dbg_plot = "tmp/eigen_rad.png"
+            fig,axis = plt.subplots(1,2)
+            ext = self.gallens.kw_extents["extent_arcsec"]
+            im0 = axis[0].imshow(np.abs(eigen_rad_orig),
+                                 extent=ext,origin="lower")
+            axis[0].set_title("|Eigen rad|")
+            divider = make_axes_locatable(axis[1])
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(im0, cax=cax, orientation='vertical')
+            
+            im0 = axis[1].imshow(np.abs(eigen_rad),
+                                 extent=ext,origin="lower")
+            str_smooth=""
+            if is_rad_smooth:
+                str_smooth = " and smoothed"
+            axis[1].set_title("|Eigen rad| (clipped"+str_smooth+")")
+            divider = make_axes_locatable(axis[0])
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(im0, cax=cax, orientation='vertical')
+            fig.tight_layout()
+            fig.savefig(dbg_plot)
+            print(f"Saving {dbg_plot}")
+            plt.close(fig)
+            raise RuntimeError(f"Radial critical curve not found.\nCheck {dbg_plot}")
+
+        if len(iety)<min_points:
+            dbg_plot = "tmp/eigen_tan.png"
+            ext = self.gallens.kw_extents["extent_arcsec"]
+
+            fig,axis = plt.subplots(1,2)
+            im0 = axis[0].imshow(np.abs(eigen_tan_orig),
+                                 extent=ext,origin="lower")
+            axis[0].set_title("|Eigen tan|")
+            divider = make_axes_locatable(axis[1])
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(im0, cax=cax, orientation='vertical')
+            
+            im0 = axis[1].imshow(np.abs(eigen_tan_smooth),
+                                 extent=ext,origin="lower")
+            axis[1].set_title("|Eigen tan| (clipped and smoothed)")
+            divider = make_axes_locatable(axis[0])
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(im0, cax=cax, orientation='vertical')
+            fig.tight_layout()
+            fig.savefig(dbg_plot)
+            print(f"Saving {dbg_plot}")
+            plt.close(fig)
+            raise RuntimeError(f"Tangential critical curve not found.\nCheck {dbg_plot}")
 
         # critical and caustics divided in tangential and radial
         cl_rad_x_noisy,cl_rad_y_noisy   = ra0[ierx],dec0[iery]    
@@ -345,23 +456,54 @@ class LensSystem():
         # fit them with splines  
         cl_rad_x,cl_rad_y = cod.fit_xy_spline(cl_rad_x_noisy,cl_rad_y_noisy)
         cl_tan_x,cl_tan_y = cod.fit_xy_spline(cl_tan_x_noisy,cl_tan_y_noisy)
-        
+
         # fit alpha in 2D
         # TODO: verify that it is indeed dec0,ra0 and not the other way out ->correct, see TEST
         alpha_x_spline = RectBivariateSpline(dec0,ra0, alpha_x)
         alpha_y_spline = RectBivariateSpline(dec0,ra0, alpha_y)
 
-        cc_rad_x,cc_rad_y   = cl_rad_x-alpha_x_spline.ev(cl_rad_y,cl_rad_x),\
-                              cl_rad_y-alpha_y_spline.ev(cl_rad_y,cl_rad_x)
+        cc_rad_x_noisy = cl_rad_x_noisy -alpha_x_spline.ev(cl_rad_x_noisy,cl_rad_y_noisy)
+        cc_rad_y_noisy = cl_rad_y_noisy -alpha_y_spline.ev(cl_rad_x_noisy,cl_rad_y_noisy)
 
-        cc_tan_x,cc_tan_y   = cl_tan_x-alpha_x_spline.ev(cl_tan_y,cl_tan_x),\
-                              cl_tan_y-alpha_y_spline.ev(cl_tan_y,cl_tan_x)
+        cc_tan_x_noisy = cl_tan_x_noisy -alpha_x_spline.ev(cl_tan_x_noisy,cl_tan_y_noisy)
+        cc_tan_y_noisy = cl_tan_y_noisy -alpha_y_spline.ev(cl_tan_x_noisy,cl_tan_y_noisy)
 
+        
+
+        cc_rad_x = cl_rad_x-alpha_x_spline.ev(cl_rad_y,cl_rad_x)
+        cc_rad_y = cl_rad_y-alpha_y_spline.ev(cl_rad_y,cl_rad_x)
+
+        cc_tan_x  = cl_tan_x-alpha_x_spline.ev(cl_tan_y,cl_tan_x)
+        cc_tan_y  = cl_tan_y-alpha_y_spline.ev(cl_tan_y,cl_tan_x)
+
+        """
+        #DEBUG plot and store
+        plt.close()
+        plt.scatter(cc_rad_x_noisy,cc_rad_y_noisy,label="cc rad,noisy",marker=".")
+        plt.scatter(cc_rad_x,cc_rad_y,label="cc rad",marker=".")
+        plt.scatter(cc_tan_x_noisy,cc_tan_y_noisy,label="cc tan,noisy",marker=".")
+        plt.scatter(cc_tan_x,cc_tan_y,label="cc tan",marker=".")
+    
+        plt.scatter(cl_rad_x_noisy,cl_rad_y_noisy,label="cl rad,noisy",marker=".")
+        plt.scatter(cl_rad_x,cl_rad_y,label="cl rad",marker=".")
+        plt.scatter(cl_tan_x_noisy,cl_tan_y_noisy,label="cl tan,noisy",marker=".")
+        plt.scatter(cl_tan_x,cl_tan_y,label="cl tan",marker=".")
+        plt.legend()
+        
+        with open("tmp/del.dll","wb") as f :
+            dill.dump([[[cl_rad_x,cl_rad_y],[cl_rad_x_noisy,cl_rad_y_noisy]],
+                       [[cl_tan_x,cl_tan_y],[cl_tan_x_noisy,cl_tan_y_noisy]]],f)
+        plt.savefig("tmp/tmp1.png")
+        plt.close()
+        """
         kw_crit = {"caustics":{"radial":[cc_rad_x,cc_rad_y],
                                "tangential":[cc_tan_x,cc_tan_y]},
                    "critical_lines":{"radial":[cl_rad_x,cl_rad_y],
-                                     "tangential":[cl_tan_x,cl_tan_y]}
+                                     "tangential":[cl_tan_x,cl_tan_y]},
+                   "rad_smooth":is_rad_smooth,
+                    "tan_smooth":is_tan_smooth,
                   }
+        self.kw_crit = kw_crit
         return kw_crit
     ########################
     ########################
@@ -374,30 +516,38 @@ class LensSystem():
     #########
     def update_source_position(self,ra_source,dec_source):
         # useful if we want to put it in the center of the caustic
-        self.kwargs_source["center_x"] = ra_source
-        self.kwargs_source["center_y"] = dec_source
+        self.kwargs_source_def["center_x"] = ra_source
+        self.kwargs_source_def["center_y"] = dec_source
         return 0
         
-    def sample_source_pos(self,update=False,_radec=None):
+    def sample_source_pos(self,update=False,_radec=None,rnd_seed=None,recompute=False):
         """Sample the source position within the tangential
         critical caustic
-        TODO: optimise this computation and/or store the results
         """
         print("Sampling source position within tangential caustic")
+        
         if _radec is None:
             _radec = self.gallens._radec
-        kw_caustics  = self.get_kw_critical_curve_caustics(_radec=_radec)
-        ra_ct,dec_ct = kw_caustics["caustics"]["tangential"]
-        # the tangential caustic is approximated to circular
-        # and we sample uniformily within that 
-        ra0_ct,dec0_ct = np.mean(ra_ct),np.mean(dec_ct)
-        rads_ct        = np.hypot(ra_ct-ra0_ct,dec_ct-dec0_ct)
-        rad0_ct        = np.std(rads_ct)
-        rad_source     = np.random.uniform(0,rad0_ct)
-        phi_source     = np.random.uniform(0,2*np.pi)
-        ra_source      = rad_source*np.cos(phi_source) 
-        dec_source     = rad_source*np.sin(phi_source) 
-        if self.kwargs_source["center_x"]==0 and self.kwargs_source["center_x"]==0 and not update:
+        if rnd_seed is None:
+            rnd_seed = self._rnd_seed
+        # fixing seed for reproducibility            
+        print(f"Fixing seed to {rnd_seed}")
+        np.random.seed(rnd_seed)
+        res_path = self.savedir/"kw_sampled_source_pos.dll"
+        try:
+            assert not recompute
+            kw_sampled_source_pos = load_whatever(res_path)
+            print("Loaded pre-computed source position")
+            ra_source = kw_sampled_source_pos["ra_source"]
+            dec_source = kw_sampled_source_pos["dec_source"]
+        except:
+            ra_source,dec_source = _sample_source_pos(self,_radec=_radec)
+            kw_sampled_source_pos = {"ra_source":ra_source,"dec_source":dec_source}
+            with open(res_path,"wb") as f:
+                dill.dump(kw_sampled_source_pos,f)
+            print("Stored computed source position")
+            
+        if self.kwargs_source_def["center_x"]==0 and self.kwargs_source_def["center_x"]==0 and not update:
             print("Source position has to be sampled a first time")
             update=True
         if update:
@@ -417,7 +567,7 @@ class LensSystem():
         # if not given as input, reads the computed deflection map
         if alpha_map is None:
             # if not already, compute alpha_map
-            alpha_map   = self.alpha_map
+            alpha_map   = self.alpha_map(_radec=_radec)
         alpha_x,alpha_y = alpha_map        
         x_source_plane, y_source_plane = RA-alpha_x,DEC-alpha_y
         # the coords have to be given as flat
@@ -426,58 +576,48 @@ class LensSystem():
         return x_source_plane,y_source_plane
         
     def get_lensed_image(self,
-                         Sim=None,
+                         Sim,
+                         kwargs_source=None,
                          _radec=None, # 
                          unconvolved=True):
-        
         imageNumerics,sourceModel = self.get_imageNumerics(Sim=Sim,return_sourceModel=True)
-        kwargs_source = imageNumerics.kwargs_source
-        alpha_map = self.alpha_map(_radec=_radec)
-        x_source_plane,y_source_plane = self.get_xy_source_plane(alpha_map=alpha_map)
-        kwargs_source_list            = [kwargs_source]
-        source_light                  = sourceModel.surface_brightness(x_source_plane, y_source_plane, kwargs_source_list, k=None)
+        alpha_map_HR = self.alpha_map(_radec=_radec)
+        # Downsample alpha_map to the imagenumerics grid resolution by interpolation
+        coord = _radec
+        if coord is None:
+            coord = self.gallens._radec
+        # the following are "flat" coordinates
+        coord_out   = imageNumerics.coordinates_evaluate
+        alpha_map_x = interpolate_map(map=alpha_map_HR[0],coord=coord,coord_out=coord_out)
+        alpha_map_y = interpolate_map(map=alpha_map_HR[1],coord=coord,coord_out=coord_out)
+        alpha_map   = alpha_map_x,alpha_map_y
+        x_source_plane,y_source_plane = self.get_xy_source_plane(_radec=coord_out,alpha_map=alpha_map)
+        
+        if kwargs_source is None:
+            #note: the following should be the standard use
+            kwargs_source = self.kwargs_source_def
+        _kwargs_source = get_kwargs_sourceSim(Sim,kwargs_source,lens=self)
+        kwargs_source_list            = [_kwargs_source]
+        # note: following is in flux/arcsec^2 -> has to be converted into flux/pix eventually
+        source_light                  = sourceModel.surface_brightness(x_source_plane, y_source_plane, 
+                                                                       kwargs_source_list, k=None)
         # the following is to compare the Sim to the "native" resolution of the gallens image
-        sim_deltapix                  = imageNumerics.grid_class.pixel_width
-        if not np.abs(sim_deltapix-to_dimless(self.gallens.deltaPix))<1e-10:
-            if sim_deltapix<to_dimless(self.gallens.deltaPix):
-                raise RuntimeError("Simulated observatory cannot have higher resolution than baseline simulation") 
-            # different pixel scale (due to different simulated observatory)
-            source_light_im        = array2image(source_light)
-            pixel_num_aim          = imageNumerics.grid_class.num_grid_points_axes[0]
-            source_light_downgrade = zoom(source_light_im,pixel_num_aim/self.gallens.pixel_num)
-            source_light           = image2array(source_light_downgrade)
+        sim_deltapix  = imageNumerics.grid_class.pixel_width
+        gal_deltapix  = to_dimless(self.gallens.deltaPix)
+        if sim_deltapix+1e15<gal_deltapix:
+            raise RuntimeError("Simulated observatory can not have higher resolution than baseline simulation") 
         image_sim = imageNumerics.re_size_convolve(source_light, unconvolved=unconvolved)
         return image_sim
 
     # Simulating observations
     #########################
-    
-    def get_imageNumerics(self,Sim=None,return_sourceModel=False):    
-        if Sim is None:
-            Sim = self.get_Sim()
-            if not hasattr(self,"data_class"):
-                self.setup_dataclasses(Sim=Sim)
-            data_class      = self.data_class
-            psf_class       = self.psf_class
-            sourceModel     = self.source_model_class 
-            kwargs_source   = self.kwargs_source
-            kwargs_numerics = self.kwargs_numerics     
-        else:
-            data_class,psf_class,sourceModel,kwargs_numerics,kwargs_source = cod.get_dataclasses(Sim)
-        imageNumerics = self._get_imageNumerics(data_class=data_class,
-                                                psf_class=psf_class,
-                                                kwargs_numerics=kwargs_numerics)
-                                                
-        # add this for convenience:
-        imageNumerics.kwargs_source = kwargs_source
-        if return_sourceModel:
-            return imageNumerics,sourceModel
-        return imageNumerics
-                                        
-    def _get_imageNumerics(self,data_class,psf_class,kwargs_numerics):
+    def get_imageNumerics(self,Sim,return_sourceModel=False):    
+        data_class,psf_class,sourceModel,kwargs_numerics = cod.get_dataclasses(Sim)
         imageNumerics = NumericsSubFrame(pixel_grid=data_class,
                                          psf=psf_class, 
-                            **kwargs_numerics)
+                                         **kwargs_numerics)
+        if return_sourceModel:
+            return imageNumerics,sourceModel
         return imageNumerics
  
     
@@ -494,14 +634,13 @@ class LensSystem():
         if band is None:
             # This is the resolution of the simulation itself
             kwargs_single_band = self.kwargs_band_sim
-            kwargs_single_band["pixel_scale"] = to_dimless(self.gallens.deltaPix)
+            kwargs_single_band["pixel_scale"] = to_dimless(self.gallens.deltaPix)            
+            # keep the pixel number as high as the simulation
             pixel_num = self.gallens.pixel_num
+            # assumes the PSF is either NONE (default) or already defined
         else:
             kwargs_single_band = band.kwargs_single_band()
             if kwargs_psf is not None:
-                if not kwargs_psf.keys() == {"kernel_point_source":[],
-                                             "point_source_supersampling_factor":[]}.keys():
-                    raise RuntimeError(f"kwargs_psf has to have only kernel_point_source and point_source_supersampling_factor, not {kwargs_psf.keys()}")
                 kwargs_single_band.update(kwargs_psf)
             # must recompute pixel_num in order to covert to ~ the same aperture,
             # but with the new resolution 
@@ -514,12 +653,18 @@ class LensSystem():
                 )
         return Sim
 
-    def sim_image(self,SimObs,noisy=False):
+    def sim_image(self,SimObs,kwargs_source=None,noisy=False,rnd_seed=None):
         """Obtain simulated images given SimObs
         """
         image_SimObs     = self.get_lensed_image(Sim=SimObs,
-                                             unconvolved=False)
+                                                 kwargs_source=kwargs_source,
+                                                 unconvolved=False)
         if noisy:
+            if rnd_seed is None:
+                rnd_seed = self._rnd_seed
+            # fixing seed for reproducibility            
+            print(f"Fixing seed to {rnd_seed}")
+            np.random.seed(rnd_seed)
             image_SimObsnoisy  = image_SimObs + SimObs.noise_for_model(model=image_SimObs)
             error_SimObs       = SimObs.estimate_noise(image_SimObsnoisy) # NOT variance
             return image_SimObsnoisy,error_SimObs
@@ -544,3 +689,129 @@ class LensSystem():
         multi_band_list = [image_band]
         return multi_band_list
     
+
+def clip_map(map,sigma2clip=8,verbose=True):
+    if verbose:
+        print(f"Clipping map")
+    sgc = sigma_clip(map,sigma=sigma2clip)
+    msk_map = np.invert(sgc.mask)
+    return map*msk_map
+
+def clip_smooth_map(map,sigma2clip=8,sigma2smooth=3,verbose=True):
+    msked_map = clip_map(map,sigma2clip=sigma2clip,verbose=verbose)
+    if verbose:
+        print(f"Smoothing map")
+    map_smooth = gaussian_filter(msked_map,sigma=sigma2smooth)
+    return map_smooth
+
+
+def wrapper_clip_smooth_map(map,min_points=10,sigma2clip=8,
+                            sigma2smooth_min=1,sigma2smooth_max=10,name=None,verbose=False):
+    is_smooth = False
+    for s2s in np.linspace(sigma2smooth_max,sigma2smooth_min,20):
+        map_smooth = clip_smooth_map(map,sigma2clip=sigma2clip,sigma2smooth=s2s,verbose=verbose)
+        points = len(np.where(map_smooth<0)[0])
+        if points>min_points:
+            is_smooth = True
+            return map_smooth,is_smooth
+    if not is_smooth:            
+        warnings.warn(f"{name} could not be smoothed - using un-smoothed map (increase noise)")
+    return map_smooth,is_smooth
+
+
+def get0_index(map,pixel_num):
+    """
+    # have to find when those are ~0
+    mintv = np.min(np.abs(eigen_rad))
+    Dv    = np.max(np.abs(eigen_rad)) - mintv
+    maxtv = mintv + 0.1*Dv
+    test_values = np.linspace(mintv,maxtv,20)
+    """
+    test_values = np.linspace(.1,4)
+    ix,iy = [],[] #placeholders 
+    # radial
+    for tv in test_values:
+        if len(ix)/(pixel_num**2) >0.001 :
+            break
+        else:
+            iy,ix = np.where(cod.MAD_mask(np.abs(map),0,tv)) 
+    # not the inverted order
+    return ix,iy
+
+def _sample_source_pos(lens,_radec=None):
+    """
+    Sample the source position within the tangential and radial caustics
+    Note: we could restrict to within only tang. 
+    """
+    kw_caustics  = lens.get_kw_critical_curve_caustics(_radec=_radec)
+    ra_ct,dec_ct = kw_caustics["caustics"]["tangential"]
+    ra_cr,dec_cr = kw_caustics["caustics"]["radial"]
+    # We compute the convex hull defined by the tangential caustic
+    # sample uniformily from max to min, and accept only if
+    # within the convex hull
+    # not exact but fairly precise nonetheless
+    if kw_caustics["tan_smooth"]:
+        hull_tan  = Delaunay(np.array([ra_ct,dec_ct]).T)
+        def accept_tan(x0,y0):
+            return hull_tan.find_simplex([x0,y0])!=-1
+    else:
+        r0ct,d0ct = np.mean(ra_ct),np.mean(dec_ct)
+        r0st,d0st = np.std(ra_ct),np.std(dec_ct)
+        sigt = np.hypot(r0st,d0st)
+        def accept_tan(x0,y0):
+            # within 1 sigma from the center
+            return np.hypot(x0-r0ct,y0-d0ct) < sigt
+
+    
+    if kw_caustics["rad_smooth"]:
+        hull_rad  = Delaunay(np.array([ra_cr,dec_cr]).T)
+        def accept_rad(x0,y0):
+            return hull_rad.find_simplex([x_cnd,y_cnd])!=-1
+    else:
+        r0cr,d0cr = np.mean(ra_cr),np.mean(dec_cr)
+        r0sr,d0sr = np.std(ra_cr),np.std(dec_cr)
+        sigr = np.hypot(r0sr,d0sr)
+        def accept_rad(x0,y0):
+            # within 1 sigma from the center
+            return np.hypot(x0-r0cr,y0-d0cr) < sigr
+    
+    x_bounds = np.array([np.min([ra_ct.min(),ra_cr.min()]),
+                         np.max([ra_ct.max(),ra_cr.max()]) 
+                        ])
+    y_bounds = np.array([np.min([dec_ct.min(),dec_cr.min()]),
+                         np.max([dec_ct.max(),dec_cr.max()])
+                        ])
+    
+    #x_bounds = np.array([ra_ct.min(),ra_ct.max()])
+    #y_bounds = np.array([dec_ct.min(),dec_ct.max()])
+    
+    ra_source,dec_source = None,None
+    for i in range(1000):
+        # sample within range
+        x_cnd = np.random.uniform(*x_bounds)
+        y_cnd = np.random.uniform(*y_bounds)
+        
+        # accept if inside the hull (if smooth) or 
+        # within a sigma of the mean if not smooth
+        if accept_rad(x_cnd,y_cnd) and accept_tan(x_cnd,y_cnd):
+            ra_source,dec_source = x_cnd,y_cnd
+            break
+    if ra_source is None:
+        print(x_bounds)
+        print(y_bounds)
+        plt.close()
+        #ra_cr,dec_cr = kw_caustics["caustics"]["radial"]
+        plt.scatter(ra_cr,dec_cr,marker=".",label="radial",color="b")
+        plt.scatter(ra_ct,dec_ct,marker=".",label="tang.",color="r")
+        plt.legend()
+        plt.savefig("tmp/radec_ct_cr_debug.png")
+        plt.close()
+        raise RuntimeError("Failed to sample a source position")
+    return ra_source,dec_source
+
+def interpolate_map(map,coord,coord_out):
+    map_flat = image2array(map)
+    map_out = griddata(coord,map_flat,coord_out)
+    if len(np.shape(coord_out))==2:
+        map_out = array2image(map_out)
+    return map_out

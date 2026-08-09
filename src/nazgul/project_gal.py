@@ -3,6 +3,7 @@ Project the particles along different axis and verify if that produces a supercr
 a maximum source redshift and a minimum Einstein angle
 Uses Adaptime Mesh Refinement for the estimation of the density map
 """
+import gc
 import dill
 import warnings
 import numpy as np
@@ -166,7 +167,6 @@ def project_Gal(GalProj,z_source_max,sample_z_source,min_thetaE,
             if verbose:
                 print("Failed to load because "+str(e))
                 print("Recomputing projection ...")
-                kw_proj_res = {} 
             pass
     # else compute it
     if arcXkpc is None:
@@ -184,9 +184,16 @@ def project_Gal(GalProj,z_source_max,sample_z_source,min_thetaE,
     # Project the particles 
     kw_parts_proj = project_kw_parts(kw_parts=kw_parts,proj_index=proj_index)
 
+    principal_axes_2D = get_principal_axis_2D(kw_parts_proj)
+
     # compute 2D density AMR density map (parallelised)
     kw_2Ddens = dens_map_AMR(kw_parts_proj=kw_parts_proj,
                               verbose=verbose)
+
+    # From this point on kw_parts and kw_parts_proj are not used anymore
+    # explicitely free memory
+    del kw_parts
+    del kw_parts_proj
     
     savenameSigmaEnc =GalProj.proj_dir/f"Sigma_enc_proj{proj_index}.png"
 
@@ -200,12 +207,14 @@ def project_Gal(GalProj,z_source_max,sample_z_source,min_thetaE,
         nm = f"{GalProj.proj_dir}/AMR_2DDens_{GalProj.name}_prj{proj_index}.png"
         fig.savefig(nm)
         print(f"Saved {nm}") 
+        plt.close(fig)
         
     if kw_z_min["z_source_min"] is np.nan:
         if verbose:
             print("This projection of the galaxy does not lead to a supercritical lens. \
 Rerun trying different projection")
         # store the kw_z_min
+        del kw_z_min["fig_Sig"]
         kw_proj_res = kw_proj | kw_z_min
         pass
     else:
@@ -225,9 +234,13 @@ Rerun trying different projection")
         kw_thetaE = {"thetaE":thetaE} 
                     
         kw_proj_res  = kw_proj|kw_2Ddens|kw_z_min|kw_thetaE
-
         proj_supercrit = True
-            
+    # explicitely free memory
+    del kw_2Ddens
+    del kw_z_min
+    gc.collect()
+    kw_proj_res["principal_axes_2D"] = principal_axes_2D
+    
     with open(GalProj.projection_path,"wb") as f:
         dill.dump(kw_proj_res,f)
     print(f"Saved {GalProj.projection_path}")
@@ -240,7 +253,12 @@ Rerun trying different projection")
         raise ProjectionError(proj_message)
     return kw_proj_res
 
-
+def get_principal_axis_2D(kw_parts_proj):
+    Ms = np.asarray(kw_parts_proj["Ms"].to("Msun"))*u.Msun
+    Xs = np.asarray(kw_parts_proj["Xs"].to("kpc"))*u.kpc
+    Ys = np.asarray(kw_parts_proj["Ys"].to("kpc"))*u.kpc
+    return compute_principal_axis_2D(m=Ms,x=Xs,y=Ys)
+    
 def dens_map_AMR(kw_parts_proj,
                   max_particles=100,
                   min_area=0.1*u.kpc*u.kpc,
@@ -268,6 +286,16 @@ def dens_map_AMR(kw_parts_proj,
     kw_2Ddens = {"MD_value":MD_value,"MD_coords":MD_coords,"AMR_cells":AMR_cells}
     return kw_2Ddens
 
+def get_interpSigEncArc2(theta,Sigma_encl_arc):
+    # intepolate it
+    _interpSigEncArc2   = interp1d(theta,Sigma_encl_arc)
+    Sigma_encl_arc_unit = Sigma_encl_arc.unit
+    # define it such that it preserves the units
+    def interpSigEncArc2(thetaE):
+        thetaE = ensure_unit(thetaE,u.arcsec)
+        return _interpSigEncArc2(thetaE)*Sigma_encl_arc_unit
+    return interpSigEncArc2
+
 def get_min_z_source(GalProj,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,savenameSigmaEnc = tmp_dir/"Sigma_enc.png"):
     """Given a projection, return the minimal z_source
     fails if it can't produce a supercritical lens w. z_source<z_source_max and 
@@ -287,17 +315,11 @@ def get_min_z_source(GalProj,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,
     Sigma_encl_arc = Sigma_encl/(arcXkpc**2)
 
     
-    # intepolate it
-    _interpSigEncArc2   = interp1d(theta,Sigma_encl_arc)
-    # define it such that it preserves the units
-    def interpSigEncArc2(thetaE):
-        thetaE = ensure_unit(thetaE,u.arcsec)
-        return _interpSigEncArc2(thetaE)*Sigma_encl_arc.unit
     # create a function to verify that the given lens is is indeed a lens
+    interpSigEncArc2 = get_interpSigEncArc2(theta,Sigma_encl_arc)
     verify_lens  = create_verify_lens_fnc(interpSigEncArc2)
     
     Sigma_crit_min_arc = Sigma_crit_min/(arcXkpc**2)
-    #plt.close()
     fig,ax = plt.subplots(1)
     ax.plot(theta,Sigma_encl_arc,color="k")
     ax.axhline(Sigma_crit_min_arc.value,ls="--",c="r",label=r"$\Sigma_{crit}^{min}=\Sigma_{crit}(z_{source,max}$="+str(z_source_max)+")="+str(short_SciNot(Sigma_crit_min_arc)))
@@ -314,7 +336,7 @@ def get_min_z_source(GalProj,kw_2Ddens,z_source_max,min_thetaE_kpc,verbose=True,
     ax.set_ylabel(r"$\Sigma$ ["+str(Sigma_encl_arc.unit)+"]")
     ax.set_title(r"$\Sigma_{encl}$")
     ax.legend()
-
+    plt.close(fig)
     # Obtain the z_source_min:        
     ##########################
     # to be considered a lens, the dens. threshold has to be larger than the critical density 
@@ -334,7 +356,21 @@ def create_verify_lens_fnc(interpSigEncArc2):
     Create function to verify that the galaxy is supercritical given the chosen 
     conditions: max z, min thetaE
     """
+    # extract just the underlying data arrays from the interpolator
+    Sigma_encl_arc_unit = interpSigEncArc2.__closure__[0].cell_contents
+    _interpolator = interpSigEncArc2.__closure__[1].cell_contents
+    x_data  = _interpolator.x
+    y_data  = _interpolator.y
+    kind    = _interpolator._kind
+    _cache  = {}   # mutable object in closure, not serialised heavily
+
     def verify_lens(gal_class,min_thetaE=None,z_source_max=None):
+        if "interp" not in _cache:
+            from scipy.interpolate import interp1d
+            _cache["interp"] =  interp1d(x_data, y_data, kind=kind)
+        def rec_interpSigEncArc2(theta):
+            theta = ensure_unit(theta,u.arcsec)
+            return  _cache["interp"](theta)*Sigma_encl_arc_unit
         z_lens  = gal_class.z 
         cosmo   = gal_class.cosmo 
         arcXkpc = cosmo.arcsec_per_kpc_proper(z_lens)
@@ -342,9 +378,9 @@ def create_verify_lens_fnc(interpSigEncArc2):
             min_thetaE = gal_class.min_thetaE
         min_thetaE = ensure_unit(min_thetaE,u.arcsec)
         if z_source_max is None:
-            z_source_max = gallens_class.z_source_max
+            z_source_max = gal_class.z_source_max
             
-        minSigEncArc2  = interpSigEncArc2(min_thetaE)
+        minSigEncArc2  = rec_interpSigEncArc2(min_thetaE)
         minSigEnc      = minSigEncArc2*(arcXkpc**2)
         Dd             = cosmo.angular_diameter_distance(z_lens)
         thresh_DsDds   = minSigEnc*(4*np.pi*const.G*Dd)/(const.c**2)
@@ -513,7 +549,7 @@ def theta_E_from_AMR_densitymap(kw_2Ddens, Dd, Ds, Dds,fig_Sig=None,nm_sigmaplot
     
     print(f"Saving {nm_sigmaplot}")
     fig.savefig(nm_sigmaplot)
-    
+    plt.close(fig)
     return thetaE
     
 def Gal2MRADEC(Gal,proj_index,arcXkpc):
@@ -527,7 +563,7 @@ def Gal2kw_samples(Gal,proj_index,MD_coords,arcXkpc,dist_thresh=50*u.arcsec):
     Ms,RAs,DECs = Gal2MRADEC(Gal,proj_index,arcXkpc=arcXkpc)
     # RA,DEC= arcsec, Ms = Msun
     #print("Some galaxy have a 'shifted' CM")
-    RA_cm,DEC_cm = get_CM(Ms,RAs,DECs)
+    RA_cm,DEC_cm = get_CM(Ms=Ms,Xs=RAs,Ys=DECs)
     print(f"Recentering around the maximum density point (MD) obtained with AMR")
     RA_MD,DEC_MD = MD_coords.to("kpc")*arcXkpc
     print("Info:  CM vs MD ")
@@ -568,3 +604,31 @@ def get_2Dkappa_map(Gal,proj_index,MD_coords,SigCrit,kwargs_extents,arcXkpc=None
     kappa = density/SigCrit
     kappa = kappa.to("").value
     return kappa
+
+
+def compute_principal_axis_2D(m,x,y):
+    """
+    Similarly to compute_principal_axis_gen of Translator:
+    Compute eigenvalues of the mass-weighted inertia tensor, which can be used to infer the axis of the particles, but now in 2D given a projection
+    """
+    cnt2 = np.mean(x)**2 + np.mean(y)**2 
+    sz2  = np.std(x)**2 + np.std(y)**2 
+    if cnt2>sz2:
+        raise RuntimeError("Particles position must be centered around 0!")
+    pos = np.transpose([x,y])
+    m = np.array(m) # ensures no issues with dimensions
+    I = np.zeros((2,2))
+    for i in range(len(pos)):
+        r = pos[i]
+        I += m[i] * np.outer(r, r)
+
+    # eigenvalues
+    eigvals = np.linalg.eigvalsh(I)
+    eigvals = np.sort(eigvals)[::-1]  # λ1 ≥ λ2 ≥ λ3
+
+    a = np.sqrt(eigvals[0])
+    b = np.sqrt(eigvals[1])
+    
+    principal_axes_2D = {"a":a,"b":b,"I2D":I}
+
+    return principal_axes_2D

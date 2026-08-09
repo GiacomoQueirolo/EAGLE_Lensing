@@ -1,4 +1,4 @@
-# Copy from modelling_updated, now we simulate addition of LOS
+raise NotImplementedError("This modelling script is to be brought up to date")
 
 import argparse
 import numpy as np
@@ -18,22 +18,15 @@ from python_tools.read_fits import load_fits
 from python_tools.tools import mkdir,to_dimless
 from python_tools.get_res import load_whatever
 
+from nazgul.pathfinder import tmp_dir
 from nazgul.plot_PL import plot_all
 from nazgul.masking import mask_SEAGLE,mask_max_dens,mask_bright_center,resize_mask
-from nazgul.mount_doom.cracks_of_doom import LoadLens,get_extents
+from nazgul.mount_doom.cracks_of_doom import LoadLens
 from nazgul.mount_doom.lens_system import LensSystem
-from nazgul.plot_PL import plot_kappamap
-
-from nazgul.lens_part_LOS import get_kw_los
-from nazgul.pathfinder import get_sim_dir
-
-#default_lens_path = "RingBearer/EAGLE/RefL0025N0752/snap_023/Gn7SGn0/Sub/Sub_Gn7SGn0_Npix200_PartAS_Prj0.pkl"
-#default_lens_path = "RingBearer/EAGLE/RefL0025N0752/snap_027/Gn3SGn0/Sub/Sub_Gn3SGn0_Npix200_PartAS_Prj1.pkl"
-default_lens_path = f"{get_sim_dir()}/snap_027/Gn22SGn0/Sub/Sub_Gn22SGn0_Npix200_PartAS_Prj0.pkl"
 
 lens_model_list   = ['EPL','SHEAR_GAMMA_PSI']
 source_model_list = ["SERSIC"]
-res_dir_base      = Path("./tmp/modelling_sim_lenses/")
+res_dir_base      = tmp_dir/"modelling_sim_lenses/"
 
 def _get_model_res_dir(lens,res_dir=res_dir_base):
     res_dir = Path(f"{res_dir}/snap_{lens.gallens.Gal.snap}_{lens.name}")
@@ -41,22 +34,8 @@ def _get_model_res_dir(lens,res_dir=res_dir_base):
     
 def setup_lens(lens,res_dir=res_dir_base):
     lens.model_res_dir = _get_model_res_dir(lens,res_dir=res_dir)
-    lens.image_sim = lens.get_lensed_image(unconvolved=False)
-    mkdir(lens.model_res_dir)
-    
-    # For conveniency, but likely not the best idea:
-    print("TODO: This is valid ONLY when we are only modelling a galaxy")
-    lens.kw_extents = get_extents(arcXkpc=lens.gallens.arcXkpc,
-                                  _radec=lens.gallens._radec)
-    lens.kappa_map = lens.gallens.kappa_map
-    lens.Gal = lens.gallens.Gal
-    lens.z_lens = lens.gallens.z_lens
-    lens.z_source = lens.gallens.z_source
-    lens.deltaPix = lens.gallens.deltaPix
-    lens.pixel_num = lens.gallens.pixel_num
-    
-    #lens.kwargs_lens = lens.gallens.kwargs_lens
-    plot_all(lens,skip_caustic=True)
+    mkdir(res_dir)
+    plot_all(lens,skip_caustic=False)
     return lens
     
     
@@ -86,7 +65,7 @@ def setup_sim_obs(lens,band_str="HST_F160W",pssf=3):
 def get_lens_mask(lens,image_obs,plot_mask=True):
     # masking inner and outer of thetaE -> nope, follow SEAGLE approach
     #image = kwargs_data["image_data"]
-    mask_HD = mask_SEAGLE(lens)*mask_bright_center(lens,rad=lens.gallens.thetaE*.5) #mask_max_dens(lens)
+    mask_HD =  mask_SEAGLE(lens)*mask_bright_center(lens,rad=lens.thetaE*.5) #mask_max_dens(lens)
     mask_LD = resize_mask(mask_HD,image_obs)
     if plot_mask:
         plt.close()
@@ -149,7 +128,7 @@ def get_kwargs_likelihood(lens,image_obs,plot_mask=True):
 def get_kwargs_params(lens):
     # Params:
     # initial guess of non-linear parameters, we chose different starting parameters than the truth #
-    tE = lens.gallens.thetaE.value
+    tE = lens.thetaE.value
     kwargs_lens_init = [{'theta_E': tE + np.random.normal(0,.1,1)[0]*tE, 
                     'e1': 0, 'e2': 0, 
                     'gamma': 2., 
@@ -186,20 +165,18 @@ n_part_std = 300
 #MCMC
 n_burn_std = 200
 n_run_std  = 1000
-
 if __name__=="__main__":
     parser = argparse.ArgumentParser(prog=sys.argv[0],description="Simulate and model the lens")
     parser.add_argument('-rt','--run_type',type=int,dest="run_type",default=0,help= f"""Type of run: 
         0 = standard, PSO_it = {n_it_std} PSO_prt = {n_part_std} MCMCb = {n_burn_std} MCMCr = {n_run_std}  
         1 = test run  PSO_it = 3      PSO_prt = 3      MCMCb = 1     MCMCr = 2 
        (PSO_it: PSO iterations, PSO_prt: PSO particles, MCMCr: MCMC run steps, MCMCb: MCMC burn in steps)\n""")
-    parser.add_argument('-mtE','--min_theta_E',type=float,default=0.5,dest="min_thetaE",
+    parser.add_argument('-mtE','--min_theta_E',type=float,default=0.7,dest="min_thetaE",
                         help="Minimum thetaE threshold for the galaxy to be considered a lens (float, e.g. 0.9)")
-    parser.add_argument('-mM','--min_Mass',type=str,default="1e12",dest="min_mass",
+    parser.add_argument('-mM','--min_Mass',type=str,default="3e12",dest="min_mass",
                         help="Minimum mass threshold for the galaxy to be loaded (str, e.g. 3e12)")
-    parser.add_argument('-lp','--lens_path',type=str,default=default_lens_path,
-                        dest="lens_path",
-                        help="Path to pre-computed LensPart class instance")
+    parser.add_argument('-lp','--lens_path',type=str,default="",dest="lens_path",
+                        help="Path to pre-computed LensSystem class instance")
     
     args         = parser.parse_args()
     run_type     = args.run_type
@@ -221,23 +198,23 @@ if __name__=="__main__":
     else:
         raise RuntimeError("Give a valid run_type or implement it your own")
 
-    print("Loading lens from \n"+lens_path+"\n")
-    gal_lens = LoadLens(lens_path)
-    """print("Adding LOS effects")
-    kw_los = get_kw_los()
-    kw_add_lenses = {"lens_model_list":["LOS"],
-                    "kwargs_lens":[kw_los]}
-    lens = LensSystem.from_GalLens(gal_lens,kwargs_add_lenses=kw_add_lenses)
-    """
-    lens = LensSystem.from_GalLens(gal_lens)
-    if lens.gallens.thetaE.value<min_thetaE:
-        raise RuntimeError(f"Ensure that the thetaE of the input lens is larger than min_thetaE: {lens.gallens.thetaE.value}<{min_thetaE}")
-        
-    if lens.gallens.Gal.M < min_mass:
-        raise RuntimeError(f"Ensure that the M of the input lens is larger than min_mass:{lens.gallens.Gal.M} < {min_mass}")
-    
+    if lens_path=="":
+        lens = wrapper_get_rnd_lens(kw_lenspart={"min_thetaE":min_thetaE},
+                                    kw_galpart={"min_mass":min_mass},
+                                    reload=True)
+    else:
+        print("Loading lens from \n"+lens_path+"\n")
+        lens = LoadLens(lens_path)
+        lens.unpack()
+        if "/Sub/" in lens_path:
+            lens = LensSystem.from_GalLens(lens)
+            lens.upload_prev()
+        #lens._unpack_Gal()
+        if lens.thetaE.value<min_thetaE:
+            raise RuntimeError("Ensure that the thetaE of the input lens is larger than min_thetaE")
+        if lens.Gal.M < min_mass:
+            raise RuntimeError("Ensure that the M of the input lens is larger than min_mass")
     lens = setup_lens(lens)
-    plot_kappamap(lens.gallens.kappa_map,extent_kpc=lens.gallens.kw_extents["extent_kpc"],savename=f"{lens.model_res_dir}/kappa_gal.png")
     multi_band_list = setup_sim_obs(lens)
     image_obs = multi_band_list[0][0]["image_data"]
     
@@ -374,7 +351,7 @@ if __name__=="__main__":
         sampler_type, mc_sample, param_mcmc, mc_logL  = chain_list[-1]
         chnl_path = f'{lens.model_res_dir}/chain_list.dll'
         with open(chnl_path,"wb") as f:
-            dill.dump(chnl_path,f)
+            dill.dump(chain_list,f)
         print(f"Saving {chnl_path}")
         corner(mc_sample,labels=param_mcmc,show_titles=True,plot_datapoints=False,hist_kwargs= {"density":True})
         nm = f'{lens.model_res_dir}/mcmc_post.pdf'

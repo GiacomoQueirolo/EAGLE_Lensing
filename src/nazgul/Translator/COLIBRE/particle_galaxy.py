@@ -8,13 +8,14 @@ import warnings
 import unyt as u  # package used by swiftsimio to provide physical units
 import numpy as np
 from pathlib import Path
+from functools import cached_property
 
 from python_tools.tools import mkdir
 from python_tools.get_res import LoadClass,load_whatever
 
 from nazgul.pathfinder import get_gal_dir,path_nazgul
 from nazgul.Translator.particle_galaxy import BasicPartGal,store_class
-from nazgul.Translator.COLIBRE import simsuite_name,part_type_list,check_part_type
+from nazgul.Translator.COLIBRE import simsuite_name,simsuite_short_name,part_type_list,check_part_type
 
 from nazgul.Translator.COLIBRE.get_Gal import get_swiftgal,get_snap,get_z_snap
 from nazgul.Translator.COLIBRE.get_Gal import std_sim,std_subsim,colibre_base_path
@@ -42,20 +43,16 @@ def get_masses_part(Gal,part_type):
     "Return masses in [Msun] of given particle type"
     part_type = check_part_type(part_type)
     part  = getattr(Gal,part_type)
-    if part_type!="black_holes":
-        masses = part.masses
-    else:
-        #warnings.warn("Using dynamical mass for BH, verify that it make sense")
-        # the first is done to compute the potential, the other is updated w. the accretion and used for feedback calc.
-        # -> should be correct to use dynamical mass
-        masses = part.dynamical_masses
-    Mpart = masses.to_physical().in_units(u.Msun)  # Msun
+    Mpart = _get_masses_part(part)
     return Mpart
 
 def _get_coord_part(part):
     "Return coordinates in [kpc] of given particle instance"
     coords = part.coordinates
-    Xpart,Ypart,Zpart =  np.transpose(coords.to_physical().in_units(u.kpc))        # kpc
+    coords_phys = coords.to_physical().in_units(u.kpc)
+    Xpart = coords_phys[:, 0] # kpc
+    Ypart = coords_phys[:, 1] # kpc
+    Zpart = coords_phys[:, 2] # kpc
     return Xpart,Ypart,Zpart
     
 def _get_masses_part(part):
@@ -100,7 +97,7 @@ def get_coords(Gal):
     
 # adapted from wip_select_swiftgal
 def Gal2MXYZ(ColGal):
-    Gal   = ColGal.swift_gal
+    Gal     = ColGal.swift_gal
     # Given a ColibreGal galaxy, which then plot to as swift galaxy, return Masses (in Msun) and
     # XY coords. of particles in kpc  centered around center of mass
     Ms       = get_masses(Gal)
@@ -137,12 +134,18 @@ def Gal2MXYZ_part(Gal,part_type):
     Xs,Ys,Zs = _get_coord_part(part)
     
     # center around the center of the galaxy 
-    Cx,Cy,Cz  = Gal.centre*u.Mpc
+    Cx,Cy,Cz  = Gal.centre*1e3*u.kpc # Mpc
         
     Xs -= Cx
     Ys -= Cy
     Zs -= Cz
-    return Ms, Xs,Ys,Zs
+    
+    #Convert all to astropy for convenience
+    Ms = Ms.to_astropy()
+    Xs = Xs.to_astropy()
+    Ys = Ys.to_astropy()
+    Zs = Zs.to_astropy()
+    return Ms,Xs,Ys,Zs
 
 def get_kw_SimPartGal(kw_Gal,sim,simsuite,subsim,data_dir,z,snap,M,Centre,reload):
     assert simsuite==simsuite_name
@@ -163,22 +166,26 @@ class SimPartGal(BasicPartGal):
     _large_attributes_unpack = []
     
     simsuite = simsuite_name
+    simsuite_code = simsuite_short_name
+ 
     def __init__(self,kw_Gal,sim=std_sim,subsim=std_subsim):
         #kw_Gal: soap_index,snap and/or z
         #self.kw_Gal     = kw_Gal
         self.soap_index  = kw_Gal["soap_index"] #self.swift_gal.halo_catalogue.soap_index
         self.z,self.snap = get_z_snap(z=kw_Gal.get("z",None),
-                            snap=kw_Gal.get("snap",None))
+                            snap=kw_Gal.get("snap",None),
+                                     sim=sim,subsim=subsim)
         
         self.sim         = Path(sim)
         self.subsim      = Path(subsim)
         
         # here we load but not store the swift galaxy to avoid 
         # increasing the memory load
-        self.soap_file  = Path(self.swift_gal.halo_catalogue.soap_file)
+        sg              = self.swift_gal
+        self.soap_file  = Path(sg.halo_catalogue.soap_file)
         #'/cosma8/data/dp004/colibre/Runs/L0025N0752/THERMAL_AGN_m5/SOAP-HBT/halo_properties_0127.hdf5'
         
-        self.a =  self.swift_gal.metadata.a
+        self.a =  sg.metadata.a
         self.verbose_assert_almost_equal((1/self.a)-1,self.z,msg="Redshifts")
         self.verify_snap()
 
@@ -211,6 +218,10 @@ class SimPartGal(BasicPartGal):
             self._swift_gal = swift_gal
             return swift_gal
 
+    @swift_gal.deleter
+    def swift_gal(self):
+        del self._swift_gal
+
     @property
     def cosmo(self):
         if hasattr(self, '_cosmo_cache'):
@@ -237,20 +248,28 @@ class SimPartGal(BasicPartGal):
         self.gas         = sg.gas
         self.dark_matter = sg.dark_matter
         self.black_holes = sg.black_holes
-        # The following are very inefficient, they should be optimised
-        self.M_stars     = np.sum(self.stars.masses.to_physical().in_units(u.Msun))
-        self.M_gas       = np.sum(self.gas.masses.to_physical().in_units(u.Msun))
-        self.M_dm        = np.sum(self.dark_matter.masses.to_physical().in_units(u.Msun))
+        # The following are very inefficient
+        if not hasattr(self,"M_stars"):
+            self.M_stars     = np.sum(self.stars.masses.to_physical().in_units(u.Msun))
+        if not hasattr(self,"M_gas"):
+            self.M_gas       = np.sum(self.gas.masses.to_physical().in_units(u.Msun))
+        if not hasattr(self,"M_dm"):
+            self.M_dm        = np.sum(self.dark_matter.masses.to_physical().in_units(u.Msun))
         # again using dynamical masses for BH
-        self.M_bh        = np.sum(self.black_holes.dynamical_masses.to_physical().in_units(u.Msun))
-        self.N_part = len(sg.gas.particle_ids) +\
-                 len(sg.dark_matter.particle_ids) +\
-                 len(sg.stars.particle_ids) +\
-                 len(sg.black_holes.particle_ids) 
-        
-        self.M = np.sum(get_masses(self.swift_gal).to_astropy().value) #Msun
-        # verify that the total mass is ~ to sum of particles' masses
-        #self.verbose_assert_almost_equal( self.M_tot,self.M,decimal=0,msg="Total mass vs Sum(part. masses)")
+        if not hasattr(self,"M_bh"):
+            self.M_bh        = np.sum(self.black_holes.dynamical_masses.to_physical().in_units(u.Msun))
+        if not hasattr(self,"N_stars"):
+            self.N_stars = len(sg.stars.particle_ids)
+        if not hasattr(self,"N_gas"):
+            self.N_gas = len(sg.gas.particle_ids)
+        if not hasattr(self,"N_dm"):
+            self.N_dm = len(sg.dark_matter.particle_ids)
+        if not hasattr(self,"N_bh"):
+            self.N_bh = len(sg.black_holes.particle_ids)
+        if not hasattr(self,"N_part"):
+            self.N_part = self.N_stars + self.N_gas + self.N_dm + self.N_bh
+        if not hasattr(self,"M"):
+            self.M = self.M_stars + self.M_gas + self.M_dm + self.M_bh
         # cache cosmology so pickles loaded without COSMA can still return it
         self._cosmo_cache = sg.metadata.cosmology
         return 0
@@ -373,7 +392,7 @@ def get_rnd_SPG(sim=std_sim,subsim=std_subsim,
     kw_Gal = {"soap_index":kw_swiftgal["soap_index"],
               "snap":kw_swiftgal["snap"]}
     """
-    kw_Gal = get_rnd_kw_gal(sim=std_sim,subsim=std_subsim,
+    kw_Gal = get_rnd_kw_gal(sim=sim,subsim=subsim,
                            kw_criteria= kw_criteria,
                            min_z=min_z,
                            max_z=max_z,
@@ -392,7 +411,7 @@ def get_all_SPG(sim=std_sim,subsim=std_subsim,
                ):
     """Get all possible galaxies in the range"""
     all_SPG = []
-    all_kw_Gal = get_all_kw_gal(sim=std_sim,subsim=std_subsim,
+    all_kw_Gal = get_all_kw_gal(sim=sim,subsim=subsim,
                            kw_criteria= kw_criteria,
                            min_z=min_z,
                            max_z=max_z,

@@ -26,6 +26,7 @@ dependencies:
   - packaging
   - pyerfa
   - PyYAML
+  - unyt
   - pip  
   - pip:
       - mgefit
@@ -37,3 +38,6 @@ dependencies:
       - swiftsimio
       - sympy
       - unyt
+      - chainconsumer
+      - pydantic
+      - swiftgalaxy
