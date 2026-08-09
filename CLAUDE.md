@@ -50,7 +50,7 @@ Data flows through these stages:
 
 6. **LensSystem** (`mount_doom/lens_system.py`) — wraps `GalLens` and adds optional extra lenses (`kwargs_add_lenses`) via lenstronomy's `LensModel`. Handles simulated observations via `SimAPI`, source sampling within the tangential caustic, and lensed image generation.
 
-7. **Modelling** (`modelling_*.py`, `model_*.py`) — fits parametric models (SIS, SIE, 2SIS, with/without line-of-sight perturbers) to the simulated lens images using lenstronomy's inference engine. Outputs go to `tmp/modelling_*/`. Analysis of fitted chains is done in `combined_modelling_results.py` (all lenses) and `combined_modelling_results_one_lens.py` (single lens) using chainconsumer; both include LOS shear statistics (`shear_magnitude`, `shear_stdev`).
+7. **Modelling** (`Modelling/`) — fits parametric models (SIS, SIE, 2SIS, external shear, with/without line-of-sight perturbers) to the simulated lens images using lenstronomy's inference engine. `Modelling/lib_models.py` is the shared library (source setup, lensed-image simulation, result-dir management); the `model_*.py` and `modelling_*.py` scripts are the individual fit entry points (e.g. `model_sim_lens.py`, `model_ext_shear.py`, `model_fitLOS*.py`, `model_allLOS.py`, `modelling_sis_sie.py`, `modelling_2sis.py`, `modelling_wLOS.py`). Fit results are written per lens to `results/models/{SimCode}_{Sim}[_{subsim}]/snap_{NNN}_{lensname}/` — restructured so models from different simulation boxes land in separate subdirs (`get_model_res_dir`/`_get_sim_dir` in `lib_models.py`). Analysis of fitted chains is done in the top-level `combined_modelling_results.py` (all lenses) and `combined_modelling_results_one_lens.py` (single lens) using chainconsumer; both include LOS shear statistics (`shear_magnitude`, `shear_stdev`).
 
 8. **LensPop** (`LensPop/`) — pre-computed lens population catalogs for DES, Euclid, LSST. Active telescope is set via `forecast_telescope` in `configurations.py`.
 
@@ -58,7 +58,7 @@ Data flows through these stages:
 
 ### Data storage tree
 
-All persistent results live under `src/nazgul/RingBearer/` (gitignored):
+Per-galaxy cached objects live under `src/nazgul/RingBearer/` (gitignored). Parametric-model fit outputs live under a sibling `src/nazgul/results/models/` tree, and scratch/intermediate files under `tmp/` (see `pathfinder.py`: `std_data_dir`, `results_dir`, `tmp_dir`).
 
 ```
 RingBearer/
@@ -73,8 +73,14 @@ RingBearer/
             Gal/                  PartGal pickle
             Projection/           projection_{0,1,2}.pkl  (ProjGal)
             Sub/                  Sub_*Npix*Part*Prj*.pkl (GalLens)
-            Dom/                  parametric model fits
+            Dom/                  high-level lens-model computation
             LensSystem/           LensSystem pickles
+
+results/
+  models/
+    {SimCode}_{Sim}[_{subsim}]/  e.g. EGL_RefL0025N0752/, CLB_L0025N0752_THERMAL_AGN_m5/
+      snap_{NNN}_{lensname}/      parametric model fit outputs (Modelling/)
+tmp/                             scratch / intermediate files
 ```
 
 ### Key classes and the `reload` flag
