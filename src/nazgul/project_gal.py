@@ -38,10 +38,11 @@ class ProjGal:
         return super().__new__(cls)
                 
     def __init__(self,Gal,projection_index):
-        self._gal            = Gal
-        self._gal_id         = Gal._identity()
-        self.proj_index      = projection_index
-        mkdir(self.proj_dir)
+        if not isinstance(Gal,ProjGal):
+            self._gal            = Gal
+            self._gal_id         = Gal._identity()
+            self.proj_index      = projection_index
+            mkdir(self.proj_dir)
 
     @property
     def projection_path(self):
