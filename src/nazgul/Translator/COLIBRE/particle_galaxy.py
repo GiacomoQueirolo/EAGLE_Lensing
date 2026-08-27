@@ -103,11 +103,9 @@ def Gal2MXYZ(ColGal):
     Ms       = get_masses(Gal)
     # Particle pos
     Xs,Ys,Zs = get_coords(Gal)
-    # Centre of Mass
-    X_cm = np.sum(Xs*Ms)/np.sum(Ms)
-    Y_cm = np.sum(Ys*Ms)/np.sum(Ms)
-    Z_cm = np.sum(Zs*Ms)/np.sum(Ms)
+    
     # recenter around CM
+    X_cm,Y_cm,Z_cm = get_CoM(Gal,XYZM=[Xs,Ys,Zs,Ms])
     Xs-=X_cm
     Ys-=Y_cm
     Zs-=Z_cm
@@ -120,8 +118,22 @@ def Gal2MXYZ(ColGal):
     
     return Ms, Xs,Ys,Zs
 
+def get_CoM(Gal,XYZM=None):
+    if XYZM is None:
+        # Given a ColibreGal galaxy, which then plot to as swift galaxy, return Masses (in Msun) and
+        # XY coords. of particles in kpc  centered around center of mass
+        Ms       = get_masses(Gal)
+        # Particle pos
+        Xs,Ys,Zs = get_coords(Gal)
+        XYZM = Xs,Ys,Zs,Ms
+    Xs,Ys,Zs,Ms = XYZM
+    # Centre of Mass
+    X_cm = np.sum(Xs*Ms)/np.sum(Ms)
+    Y_cm = np.sum(Ys*Ms)/np.sum(Ms)
+    Z_cm = np.sum(Zs*Ms)/np.sum(Ms)
+    return X_cm,Y_cm,Z_cm
     
-def Gal2MXYZ_part(Gal,part_type): 
+def Gal2MXYZ_part(Gal,part_type,CM=None): 
     """Given the galaxy, return Masses (in Msun) and
     XY coords. of a specific particle type in kpc centered around center
     """
@@ -133,12 +145,22 @@ def Gal2MXYZ_part(Gal,part_type):
     # Particle pos
     Xs,Ys,Zs = _get_coord_part(part)
     
-    # center around the center of the galaxy 
-    Cx,Cy,Cz  = Gal.centre*1e3*u.kpc # Mpc
+    # center around the center of the galaxy -> this has already been subtracted by COLIBRE 
+    # but do re-center around the CoM
+    """Cx,Cy,Cz  = Gal.centre*1e3*u.kpc # Mpc
         
     Xs -= Cx
     Ys -= Cy
     Zs -= Cz
+    """
+    # NOTE: however to compare them to the output of Gal2MXYZ
+    # we should rescale them by the CoM -> 
+    if CM is None:
+        CM = get_CoM(Gal)
+    X_cm,Y_cm,Z_cm = CM
+    Xs -= X_cm
+    Ys -= Y_cm
+    Zs -=Z_cm
     
     #Convert all to astropy for convenience
     Ms = Ms.to_astropy()
@@ -248,7 +270,7 @@ class SimPartGal(BasicPartGal):
         if not hasattr(self,"N_bh"):
             self.N_bh = len(sg.black_holes.particle_ids)
         if not hasattr(self,"N_part"):
-            self.N_part = self.N_star + self.N_gas + self.N_dm + self.N_bh
+            self.N_part = self.N_stars + self.N_gas + self.N_dm + self.N_bh
         if not hasattr(self,"M"):
             self.M = self.M_stars + self.M_gas + self.M_dm + self.M_bh 
         return 0
