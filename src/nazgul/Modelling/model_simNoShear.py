@@ -16,7 +16,7 @@ from nazgul.mount_doom.lens_system import LensSystem
 from nazgul.Translator import std_sim,std_simsuite,std_subsim
 from nazgul.Modelling.lib_models import setup_lens,setup_sim_obs,get_kwargs_likelihood,get_lenses2model
 from nazgul.Modelling.lib_models import save_data,plot_model_plot
-from nazgul.Modelling.lib_models import model_res_base,n_it_std,n_part_std,n_burn_std,n_run_std # default values
+from nazgul.Modelling.lib_models import model_res_base,n_it_std,n_part_std,n_burn_std,n_run_std,get_res_dir # default values
 
 # WOI cross-machine lock
 from python_tools.tools import mkdir
@@ -49,7 +49,7 @@ def get_kwargs_params(lens):
     kwargs_lower_lens = [{'theta_E': 0, 'e1': -0.5, 'e2': -0.5, 'gamma': 1.5, 'center_x': -10., 'center_y': -10}]
     kwargs_lower_source = [{'R_sersic': 0.001, 'n_sersic': .5, 'center_x': -10, 'center_y': -10}]
     # hard bound upper limit in parameter space #
-    kwargs_upper_lens = [{'theta_E': 10, 'e1': 0.5, 'e2': 0.5, 'gamma': 2.5, 'center_x': 10., 'center_y': 10}]
+    kwargs_upper_lens = [{'theta_E': 3*tE, 'e1': 0.5, 'e2': 0.5, 'gamma': 2.5, 'center_x': 10., 'center_y': 10}]
     kwargs_upper_source = [{'R_sersic': 10, 'n_sersic': 5., 'center_x': 10, 'center_y': 10}]
 
     # add LOS params
@@ -166,9 +166,8 @@ if __name__=="__main__":
                           "subsim":subsim,
                            "simsuite":simsuite,
                             "snaps":snaps}
-    res_dir = res_dir_base
-    if run_type>1:
-        res_dir = res_dir_base/"test"
+    res_dir = get_res_dir(res_dir_base,simsuite,sim,
+                          subsim=subsim,run_type=run_type)
 
     print("\nGetting catalogue of lenses 2 model\n###################\n")
     gal_lenses  = get_lenses2model(res_dir=res_dir,

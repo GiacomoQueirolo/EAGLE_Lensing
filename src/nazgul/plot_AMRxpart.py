@@ -17,7 +17,6 @@ from python_tools.tools import mkdir,ensure_unit
 from nazgul.project_gal import project_kw_parts,dens_map_AMR,cells2SigRad,ProjGal
 
 from nazgul.lib_cosmo import SigCrit
-from nazgul.plot_one_gal import plot_gal
 from nazgul.AMR2D_PLL import plot_AMR_cells
 from nazgul.Translator import std_sim,std_simsuite,std_subsim
 from nazgul.Translator.translator import PartGal,Gal2kwMXYZ,Gal2kwMXYZ_part,get_sim_func
@@ -62,6 +61,14 @@ def get_kw_1D_density(Gal,
         kw_parts_all_proj = project_kw_parts(kw_parts_all,proj_index)
         kw_2Ddens_all     = dens_map_AMR(kw_parts_proj=kw_parts_all_proj,
                                          **kw_densmap) 
+        # Tacun
+        if Gal.simsuite== "COLIBRE":
+            warnings.warn("This is a tacun, a monkey patch")
+            from nazgul.Translator.COLIBRE.particle_galaxy import get_CoM
+            XYZM   = kw_parts_all["X"],kw_parts_all["Y"],kw_parts_all["Z"],kw_parts_all["M"]
+            CM_all = get_CoM(Gal,XYZM=XYZM)
+            kw_1D_dens["CM_all"] = CM_all
+            
         # free memory
         del kw_parts_all,kw_parts_all_proj
         r_all,Sigma_encl_all   = cells2SigRad(kw_2Ddens_all)
@@ -87,7 +94,8 @@ def get_kw_1D_density(Gal,
         kw_1D_dens["tE"]         = tE
         kw_1D_dens["arcXkpc"]    = arcXkpc
         kw_1D_dens["kw_extents"] = kw_extents
-    
+
+            
         if plot_figall:
             savedir = get_savedir_plots(Gal,savedir=savedir)
             figall,axall = plot_AMR_cells(kw_2Ddens_all,kw_extents=kw_extents)        
@@ -184,7 +192,11 @@ def plot_AMR_densityXpart(Gal,
         if "bh" in tp.lower() or "hole" in tp.lower():
             warnings.warn("Ignoring BH particles- too few to make an AMR")
             continue
-        kw_parts      = Gal2kwMXYZ_part(Gal,part_type=tp)
+        if Gal.simsuite== "COLIBRE":
+            warnings.warn("This is a tacun, a monkey patch")
+            kw_parts      = Gal2kwMXYZ_part(Gal,part_type=tp,CM=kw_1D_dens["CM_all"])
+        else:
+            kw_parts      = Gal2kwMXYZ_part(Gal,part_type=tp)
         # consider the case that there are too few particles and skip it
         if len(kw_parts["Xs"])<part_thresh:
             warnings.warn(f"Less than {part_thresh} {tp} particles - skipping")
@@ -240,7 +252,7 @@ def plot_AMR_densityXpart(Gal,
     
 if __name__=="__main__": 
     parser = argparse.ArgumentParser(prog=sys.argv[0],description="Plot 2D mass distribution of the galaxy and Fig 5 SEAGLE_1")
-    parser.add_argument('-snap','--snap',type=int,dest="snap",default=27,help=f"Snap to consider")
+    parser.add_argument('-snap','--snap',type=str,dest="snap",default="27",help=f"Snap to consider")
     parser.add_argument('-Gn',type=int,dest="Gn",default=8, help=f"Galaxy Number (Gn) to consider")
     parser.add_argument('-SGn',type=int,dest="SGn",default=0,help=f"Sub-Galaxy Number (SGn) to consider")
     parser.add_argument('-prj','--proj_index',type=int,dest="proj_index",default=0,help=f"Projection index")
@@ -261,15 +273,20 @@ if __name__=="__main__":
     print("Using simulation: "+sim)
     print("Snap: "+snap)
     print("Galaxy: Gn",Gn,"SGn",SGn)
-    
-    Gal    = PartGal({"Gn":Gn,"SGn":SGn},
-                     simsuite=simsuite,
-                     sim=sim,
-                     subsim=subsim,
-                     z=None,snap=snap,    # redshift or snap
-                     M=None,Centre=None,
-                     reload=False)
+
+    warnings.warn("Patchy solution to finding a galaxy")
+    if simsuite=="EAGLE":
+        Gal    = PartGal({"Gn":Gn,"SGn":SGn},
+                         simsuite=simsuite,
+                         sim=sim,
+                         subsim=subsim,
+                         z=None,snap=snap,    # redshift or snap
+                         M=None,Centre=None,
+                         reload=False)
+    elif simsuite=="COLIBRE":
+        from nazgul.pathfinder import std_data_dir
+        gal_path = std_data_dir/simsuite/sim/subsim/f"snap_{snap}"/f"Gn{Gn}"/"Gal"/f"G{Gn}.dll"
+        Gal = load_whatever(gal_path)
+        
     Gal.run()
     plot_AMR_densityXpart(Gal,proj_index=proj_index)
-    plot_gal(Gal)
-    
