@@ -102,10 +102,13 @@ def deal_with_doubles(gallenses_paths,how2deal_with_doubles="take_latest"):
     else:
         raise RuntimeError(f"how2deal_with_doubles {how2deal_with_doubles} not implemented")
         
-def get_all_gallens(snaps=[27],sim=std_sim,simsuite=std_simsuite,subsim=None,data_dir=std_data_dir):
+def get_all_gallens(snaps=[27],sim=std_sim,simsuite=std_simsuite,subsim=None,data_dir=std_data_dir,n_lenses=np.nan):
     lenses= []
     computed_gallenses = get_all_gallens_paths(snaps=snaps,sim=sim,simsuite=simsuite,subsim=subsim,data_dir=data_dir)
-    
+    if not np.isnan(n_lenses):
+        print(f"Taking only the first {n_lenses} lenses") 
+        computed_gallenses = computed_gallenses[:n_lenses]
+
     for gal_lns in computed_gallenses:
         ln = load_whatever(gal_lns)
         ln.unpack()
@@ -115,11 +118,12 @@ def get_all_gallens(snaps=[27],sim=std_sim,simsuite=std_simsuite,subsim=None,dat
             lenses.append(ln)
         except ProjectionError as PE:
             # ignore galaxies which are not lenses
+            # should already have been discarded a priori
             pass
     return lenses
     
 def monkey_patch_naming(lnsgal,lnsgal_path):
-    if str(lnsgal.pkl_path)!=lnsgal_path:
+    if str(lnsgal.pkl_path)!=str(lnsgal_path) and not "results" in str(lnsgal_path):
         warnings.warn("MONKEY-PATCH:\nUpdating name of stored instance")
         os.rename(lnsgal_path,lnsgal.pkl_path)
     return 0
