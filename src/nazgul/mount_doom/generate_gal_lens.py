@@ -334,7 +334,7 @@ def is_gal_to_compute(Gal,reload=True,_list_of_skippable_gals=None,check_if_work
     if gal_already_computed(Gal):
         print("Galaxy already computed")
         if _list_of_skippable_gals is not None:
-            if Gal_name in _list_of_skippable_gals:
+            if Gal.name in _list_of_skippable_gals:
                 print("Skipping because in skippable list")
                 return None
         if reload:
