@@ -160,14 +160,19 @@ if __name__=="__main__":
         raise RuntimeError("Give a valid run_type or implement it your own")
 
     # picked by hand "bad" lenses ->
-    lenses2skip = []
+    lenses2skip = ["LS_Lens_Gn75SGn0_Prj1","LS_Lens_Gn4SGn0_Prj2","LS_Lens_Gn4SGn0_Prj0","LS_Lens_Gn14SGn0_Prj1",
+                   "LS_Lens_Gn71SGn0_Prj2","LS_Lens_Gn7SGn1_Prj2","LS_Lens_Gn15SGn1_Prj0","LS_Lens_Gn15SGn1_Prj0",
+                   "LS_Lens_Gn6SGn0_Prj2","LS_Lens_Gn1SGn2_Prj1","LS_Lens_Gn42SGn0_Prj1","LS_Lens_Gn18SGn0_Prj2",
+                   "LS_Lens_Gn18SGn0_Prj0","LS_Lens_Gn18SGn0_Prj0","LS_Lens_Gn18SGn0_Prj2","LS_Lens_Gn22SGn1_Prj2",
+                   "LS_Lens_Gn22SGn1_Prj1","LS_Lens_Gn66SGn0_Prj1","LS_Lens_Gn45SGn0_Prj0","LS_Lens_Gn33SGn0_Prj2"]
     
     kw_get_all_gallens = {"sim":sim,
                           "subsim":subsim,
-                           "simsuite":simsuite,
-                            "snaps":snaps}
+                          "simsuite":simsuite,
+                          "snaps":snaps}
     res_dir = get_res_dir(res_dir_base,simsuite,sim,
                           subsim=subsim,run_type=run_type)
+
 
     print("\nGetting catalogue of lenses 2 model\n###################\n")
     gal_lenses  = get_lenses2model(res_dir=res_dir,
