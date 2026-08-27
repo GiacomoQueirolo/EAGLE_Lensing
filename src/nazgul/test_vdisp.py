@@ -25,6 +25,7 @@ from nazgul.Translator.translator import get_vdisp
 from nazgul.Translator import std_sim,std_simsuite,std_subsim
 
 from nazgul.Translator.EAGLE.particle_galaxy import compute_principal_axes
+from nazgul.project_gal import project_Gal
 
 def get_tEsis(lensgal,**kwargs_query):
     lensgal.unpack()
@@ -72,7 +73,11 @@ def get_kw_tE(out_dll="tmp/del_theta_sis.dll",
         print("tE_sis=",np.round(theta_E_sis,2))
         print("Ratio of theta_E computed vs theta_E_sis from vel. disp:",np.round(lensgal.thetaE/theta_E_sis,2))
         if correct_core:
-            kw_prj = load_whatever(lensgal.Gal.projection_path)
+            try:
+                kw_prj = load_whatever(lensgal.Gal.projection_path)
+            except FileNotFoundError:
+                # recomputing 
+                kw_prj  = project_Gal(lensgal.Gal,z_source_max=lensgal.z_source_max,sample_z_source =lensgal.sample_z_source,min_thetaE=lens.min_thetaE)
             kmax = kw_prj["MD_value"]/lensgal.SigCrit
             rcc  = np.sqrt(1-(1/kmax.value))
             print("Ratio of theta_E computed vs theta_E_sis from vel. disp  (core corr.):",np.round(lensgal.thetaE/(theta_E_sis*rcc),2))
@@ -120,7 +125,7 @@ def get_kw_tE(out_dll="tmp/del_theta_sis.dll",
     return kw_tE
     
 def comp_tE_vs_tEsis(reload=True,
-                     out_dll = "tmp/del_theta_sis.dll",
+                     out_dll = "tmp/theta_sis.dll",
                      name_plot = "tmp/tE_sis_vs_comp.png",
                      title = r"Compare $\theta_E$",
                     kw_get_gallens={},
@@ -193,9 +198,9 @@ def comp_tE_vs_tEsis(reload=True,
         nbins =10
         print("N=",len(tE_ratio))
         plt.hist(tE_ratio,bins=nbins,alpha=.5,color="b",label=r"Original N="+str(len(tE_ratio)))
-        plt.axvline(np.median(tE_ratio),c="b",ls="--",label=r"$\theta_E/\theta_{E,SIS}$="+str(np.round(np.median(tE_ratio),1)))
+        plt.axvline(np.nanmedian(tE_ratio),c="b",ls="--",label=r"$\theta_E/\theta_{E,SIS}$="+str(np.round(np.nanmedian(tE_ratio),1)))
         plt.hist(tE_ratio_corr,bins=nbins,color="r",alpha=.5,label=r"$\theta_c$ correction")
-        plt.axvline(np.median(tE_ratio_corr),c="r",ls="--",label=r"$\theta_E/(\theta_{E,SIS}*Rcc)$="+str(np.round(np.median(tE_ratio_corr),1)))
+        plt.axvline(np.nanmedian(tE_ratio_corr),c="r",ls="--",label=r"$\theta_E/(\theta_{E,SIS}*Rcc)$="+str(np.round(np.nanmedian(tE_ratio_corr),1)))
         plt.title(r"$\theta_E$ ratio from mass map and from $\sigma_v$ with/wo cored profile correction")
         plt.legend()
         plt.xlabel(r"$\theta_E/\theta_{E,SIS}$")
@@ -222,7 +227,7 @@ def comp_tE_vs_tEsis(reload=True,
         
         print("Ugly but fast: output lenses for which the correction is not sufficient and plot their kappa map")
         lenses  = get_all_gallens(**kw_get_gallens)
-        np.where(tE_ratio_corr<thresh_tE_ratio_corr,
+        #np.where(tE_ratio_corr<thresh_tE_ratio_corr,
         if compute_q:
             fig,ax = plt.subplots(1) 
             x = np.arange(len(theta_sis_list))
@@ -245,7 +250,7 @@ def comp_tE_vs_tEsis(reload=True,
             print(f"Saving {name_plot4}")
             plt.close()
 
-            
+from nazgul.stat_lenses import get_catdir_stat
     
 if __name__ =="__main__":
     parser = argparse.ArgumentParser(prog=sys.argv[0],description="Compare computed theta E with expected one obtained from SIS (vel.disp.)")
@@ -267,6 +272,8 @@ if __name__ =="__main__":
     reload    = not args.no_reload
     compute_q = not args.no_compute_q
 
+    cat_dir = get_catdir_stat(snaps=snaps,sim=sim,simsuite=simsuite,
+                              subsim=subsim)
     correct_core = not args.ignore_correct_core
     snaps_str = "_".join([str(s) for s in snaps])
     if snaps_str=="":
@@ -279,28 +286,34 @@ if __name__ =="__main__":
     if correct_core:
         warnings.warn("Correcting for cored profile")
     
-    print("SETUP FOR SEAGLE_I")
-    if sim=="RefL0050N0752":
-        kwargs_query   = {"sim":sim,#"RefL0050N0752",
-        "min_z":0.1,#0.49,
-        "max_z":0.3,#0.51,
-        "min_hmr":1,                                   
-    
-        "min_vel_disp":120,
-        "min_mass_stars":1.76e10*.6777}
+    if simsuite=="EAGLE":
+        if sim=="RefL0050N0752":
+            print("SETUP FOR SEAGLE_I")
+            kwargs_query   = {"sim":sim,#"RefL0050N0752",
+            "min_z":0.1,#0.49,
+            "max_z":0.3,#0.51,
+            "min_hmr":1,                                   
+        
+            "min_vel_disp":120,
+            "min_mass_stars":1.76e10*.6777}
+        else:
+            raise RuntimeError("To update in a smart way")
+        assert sim==kwargs_query["sim"]
     else:
-        raise RuntimeError("To update in a smart way")
-    assert sim==kwargs_query["sim"]
+        # not used
+        kwargs_query = {}
     if reload:
         warnings.warn("Reloading prev. results")
     
-    name_plot = "tmp/tE_sis_vs_comp_SEAGLEI_COLIBRE.png"
-    title = r"Compare $\theta_E$ (SEAGLE I)"
+    name_plot = f"{cat_dir}/tE_sis_vs_comp.png"
+    out_dll = f"{cat_dir}/theta_sis.dll"
+    title = r"Compare $\theta_E$"
     
     comp_tE_vs_tEsis(reload=reload,
                      title=title,
                     kw_get_gallens=kw_get_gallens,
                     kwargs_query=kwargs_query,
+                    out_dll = out_dll,
                     name_plot=name_plot,
                      correct_core=correct_core,
                      compute_q=compute_q
