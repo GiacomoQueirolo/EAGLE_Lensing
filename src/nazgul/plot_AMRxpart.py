@@ -65,7 +65,7 @@ def get_kw_1D_density(Gal,
         if Gal.simsuite== "COLIBRE":
             warnings.warn("This is a tacun, a monkey patch")
             from nazgul.Translator.COLIBRE.particle_galaxy import get_CoM
-            XYZM   = kw_parts_all["X"],kw_parts_all["Y"],kw_parts_all["Z"],kw_parts_all["M"]
+            XYZM   = kw_parts_all["Xs"],kw_parts_all["Ys"],kw_parts_all["Zs"],kw_parts_all["Ms"]
             CM_all = get_CoM(Gal,XYZM=XYZM)
             kw_1D_dens["CM_all"] = CM_all
             
